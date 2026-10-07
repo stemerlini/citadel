@@ -3,7 +3,8 @@
 > The maesters' library for an Omarchy scientist: drop a paper in, get it renamed,
 > catalogued, cited, converted to Markdown, and readable by you, Obsidian and agents.
 
-Status: Phase 0 done (2026-10-07): skeleton, config, topic tree, `init`/`doctor`/`topics`, 25 tests. Library created at `~/Cloud/Personal-OneDrive/Citadel`.
+Status: Phase 1 done (2026-10-07): naming + citekeys, frontmatter records, SQLite/FTS5 index,
+`reindex`/`list`/`search`/`get`; 73 tests. Library at `~/Cloud/Personal-OneDrive/Citadel`.
 
 ## Goals
 
@@ -57,8 +58,9 @@ Citadel/                                  ← NOT an Obsidian vault
 already uses, made strict:
 
 - `year`: publication year, or `nd` if unknown.
-- `ShortTitle`: PascalCase, at most about 8 significant words, stop-words dropped,
-  ASCII only (`Kelvin–Helmholtz` → `KelvinHelmholtz`).
+- `ShortTitle`: the main title (subtitle after `:` dropped) in PascalCase, at most 6
+  significant words and 50 characters, stop-words dropped, ASCII only
+  (`Kelvin–Helmholtz` → `KelvinHelmholtz`, `high-power` → `HighPower`, acronyms kept).
 - `FirstAuthorSurname`: ASCII-folded (`Schäfer` → `Schafer`); an organisation for
   standards (`ECSS`, `NRL`).
 - Collisions get a suffix: `_Verma-b`.
@@ -271,6 +273,16 @@ old path → new path, topic, metadata found, confidence. Then `--apply` **copie
 yourself. Run it one folder at a time (gradual). Old topic folders map to new topics
 through an editable mapping file, and `.bib`/`.docx`/`.png`/`.mp4` files go to
 `_attachments/` or are skipped.
+
+## Findings so far
+
+- **PDF Title metadata is unreliable.** In the old library it is often a bibcode
+  (`1965plph.conf..287A`), a PostScript path or `doi:10.…`. Phase 2 must never use it
+  as the title on its own: treat it as a hint, and mine it for a DOI.
+- **Cold rclone listings are slow.** The first walk of freshly created folders took 18 s;
+  warm walks take about 0.1 s (`--dir-cache-time 72h`). Commands refresh the index
+  incrementally before answering. If that gets slow, the watcher service (Phase 3)
+  can keep the index fresh instead.
 
 ## Phases
 

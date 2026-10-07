@@ -50,3 +50,35 @@ def test_topics_text_is_indented(capsys, library_root, config_file):
 def test_no_command_points_to_help(capsys):
     code, out = run(capsys)
     assert code == 0 and "citadel doctor" in out
+
+
+def test_reindex_list_search_get(capsys, library_root, config_file, index_file):
+    from conftest import file_ref, make_ref
+
+    run(capsys, "init")
+    file_ref(library_root, make_ref(), "Energy cascade in MHD.")
+
+    code, out = run(capsys, "reindex", "--json")
+    assert code == 0 and json.loads(out)["added"] == ["verma2004statistical"]
+
+    code, out = run(capsys, "list", "--json", "--topic", "plasma-physics")
+    assert [r["citekey"] for r in json.loads(out)["references"]] == ["verma2004statistical"]
+
+    code, out = run(capsys, "search", "cascade")
+    assert "verma2004statistical" in out and "[cascade]" in out
+
+    code, out = run(capsys, "get", "verma2004statistical", "--json")
+    data = json.loads(out)
+    assert data["paths"]["pdf"].endswith("_Verma.pdf") and data["tags"] == ["mhd", "spectra"]
+
+    code, out = run(capsys, "get", "nope")
+    assert code == 1 and "No reference" in out
+
+
+def test_reindex_reports_problems(capsys, library_root, config_file, index_file):
+    run(capsys, "init")
+    broken = library_root / "optics" / "broken"
+    broken.mkdir()
+    (broken / "broken.md").write_text("junk")
+    code, out = run(capsys, "reindex")
+    assert code == 1 and "problem: optics/broken" in out
