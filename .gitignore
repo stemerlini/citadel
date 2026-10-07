@@ -1,0 +1,9 @@
+.venv/
+.venv-convert/
+__pycache__/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+# App data: config, the index (rebuildable) and caches. Not the library itself.
+data/
+cache/

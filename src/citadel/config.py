@@ -1,0 +1,129 @@
+"""User settings, kept in data/config.toml.
+
+The file is meant to be edited by hand. Citadel only writes it when it does not
+exist yet (`citadel init`), so comments and ordering you add are never lost.
+Missing keys fall back to the defaults below; unknown keys are ignored.
+"""
+
+from __future__ import annotations
+
+import os
+import tomllib
+from dataclasses import dataclass, field
+from pathlib import Path
+
+from . import paths
+
+
+@dataclass
+class ObsidianConfig:
+    vault: str = ""  # empty until the vault exists; link/note explain instead of failing
+    notes_folder: str = "Literature"
+
+
+@dataclass
+class IngestConfig:
+    review_threshold: float = 0.8  # below this confidence, items wait in _review/
+    watch_interval: int = 30  # seconds between inbox polls (inotify misses rclone changes)
+
+
+@dataclass
+class MetadataConfig:
+    # Crossref and OpenAlex serve requests faster when they include a contact address.
+    # Empty means no address is sent.
+    contact_email: str = ""
+
+
+@dataclass
+class ConvertConfig:
+    python: str = ".venv-convert/bin/python"  # Marker's own environment, relative to the app root
+    device: str = "cuda"  # cuda | cpu
+
+
+@dataclass
+class Config:
+    library: str = str(paths.DEFAULT_LIBRARY)
+    obsidian: ObsidianConfig = field(default_factory=ObsidianConfig)
+    ingest: IngestConfig = field(default_factory=IngestConfig)
+    metadata: MetadataConfig = field(default_factory=MetadataConfig)
+    convert: ConvertConfig = field(default_factory=ConvertConfig)
+
+    @property
+    def library_path(self) -> Path:
+        return Path(os.environ.get("CITADEL_LIBRARY") or self.library).expanduser()
+
+    @property
+    def vault_path(self) -> Path | None:
+        return Path(self.obsidian.vault).expanduser() if self.obsidian.vault else None
+
+    @property
+    def convert_python(self) -> Path:
+        python = Path(self.convert.python).expanduser()
+        return python if python.is_absolute() else paths.ROOT / python
+
+    @classmethod
+    def load(cls, file: Path | None = None) -> Config:
+        file = file or paths.CONFIG_FILE
+        try:
+            data = tomllib.loads(file.read_text())
+        except OSError:
+            return cls()
+        return cls.from_dict(data)
+
+    @classmethod
+    def from_dict(cls, data: dict) -> Config:
+        config = cls()
+        if isinstance(data.get("library"), str):
+            config.library = data["library"]
+        for name in ("obsidian", "ingest", "metadata", "convert"):
+            section = getattr(config, name)
+            values = data.get(name)
+            if not isinstance(values, dict):
+                continue
+            for key, value in values.items():
+                default = getattr(section, key, None)
+                if default is not None and isinstance(value, type(default)):
+                    setattr(section, key, value)
+                elif isinstance(default, float) and isinstance(value, int):
+                    setattr(section, key, float(value))
+        return config
+
+
+TEMPLATE = """\
+# Citadel settings. Edit freely: Citadel never rewrites this file.
+
+# The library folder (PDFs, Markdown, figures). Syncs through OneDrive.
+library = "{library}"
+
+[obsidian]
+# Path to your Obsidian vault. Leave empty until the vault exists.
+vault = ""
+# Vault folder where `citadel note` creates literature notes.
+notes_folder = "Literature"
+
+[ingest]
+# Below this confidence, a new item waits in _review/ instead of being filed.
+review_threshold = 0.8
+# Seconds between inbox checks.
+watch_interval = 30
+
+[metadata]
+# Optional contact address sent to Crossref/OpenAlex for faster, polite access.
+contact_email = ""
+
+[convert]
+# Python of Marker's own environment (relative paths are inside the app folder).
+python = ".venv-convert/bin/python"
+# cuda or cpu
+device = "cuda"
+"""
+
+
+def write_default(file: Path | None = None, library: Path | None = None) -> bool:
+    """Create the config file from the template. Returns False if it already exists."""
+    file = file or paths.CONFIG_FILE
+    if file.exists():
+        return False
+    file.parent.mkdir(parents=True, exist_ok=True)
+    file.write_text(TEMPLATE.format(library=library or paths.DEFAULT_LIBRARY))
+    return True

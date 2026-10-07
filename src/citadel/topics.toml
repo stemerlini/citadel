@@ -1,0 +1,165 @@
+# Citadel topic tree. Each table is one folder in the library.
+#
+# - Keys are folder paths: discipline/field/subfield, at most three levels,
+#   lowercase kebab-case. Every parent must be listed too.
+# - `description` and `keywords` tell the classifier what belongs here.
+# - To add a topic, add a table and run `citadel init` (it only creates folders).
+#   Renaming or removing a topic that already holds references needs `citadel move`.
+
+# --- Plasma physics -----------------------------------------------------------
+
+["plasma-physics"]
+description = "Plasma physics: broad reviews, textbooks and anything spanning several plasma fields."
+keywords = ["plasma", "plasma physics"]
+
+["plasma-physics/fundamentals"]
+description = "Basic plasma theory: kinetic theory, transport coefficients, collisions, waves, formularies."
+keywords = ["kinetic theory", "transport coefficients", "Braginskii", "collisions", "Vlasov", "formulary", "Debye", "plasma waves"]
+
+["plasma-physics/mhd"]
+description = "Magnetohydrodynamics: equilibria, reconnection, MHD waves and stability theory."
+keywords = ["magnetohydrodynamics", "MHD", "equilibrium", "magnetic reconnection", "Alfven", "Grad-Shafranov"]
+
+["plasma-physics/turbulence-transport"]
+description = "Plasma and MHD turbulence, energy spectra, intermittency, anomalous transport and Lévy walks."
+keywords = ["turbulence", "MHD turbulence", "energy spectrum", "cascade", "intermittency", "anomalous transport", "Levy walk", "Levy flight", "edge turbulence"]
+
+["plasma-physics/instabilities"]
+description = "Plasma instabilities: Kelvin-Helmholtz, Rayleigh-Taylor, magneto-Rayleigh-Taylor, kink and sausage modes."
+keywords = ["instability", "Kelvin-Helmholtz", "Rayleigh-Taylor", "MRT", "kink", "sausage", "growth rate"]
+
+["plasma-physics/hedp"]
+description = "High energy density physics: matter at extreme pressure and temperature."
+keywords = ["high energy density", "HEDP", "HED", "warm dense matter"]
+
+["plasma-physics/hedp/pulsed-power"]
+description = "Pulsed-power driven plasmas: z-pinches, wire arrays, MAGPIE, Z machine."
+keywords = ["pulsed power", "z-pinch", "wire array", "MAGPIE", "Z machine", "current driver", "MagLIF"]
+
+["plasma-physics/hedp/laser-plasma"]
+description = "Laser-plasma interaction and laser-driven HED experiments."
+keywords = ["laser-plasma", "laser-driven", "OMEGA", "NIF", "high-power laser", "laser ablation"]
+
+["plasma-physics/hedp/icf"]
+description = "Inertial confinement fusion: implosions, capsules, hohlraums, ignition."
+keywords = ["inertial confinement fusion", "ICF", "implosion", "hohlraum", "capsule", "ignition"]
+
+["plasma-physics/hedp/laboratory-astrophysics"]
+description = "Laboratory astrophysics: scaled experiments of jets, shocks, colliding flows and astrophysical plasmas."
+keywords = ["laboratory astrophysics", "astrophysical jets", "colliding flows", "shocks", "scaling", "Z-pinch astrophysics"]
+
+["plasma-physics/diagnostics"]
+description = "Plasma diagnostics in general: reviews, courses and multi-technique papers."
+keywords = ["plasma diagnostics", "diagnostic", "measurement"]
+
+["plasma-physics/diagnostics/refractive"]
+description = "Refractive diagnostics: schlieren, shadowgraphy, interferometry, deflectometry, Faraday rotation."
+keywords = ["schlieren", "shadowgraphy", "interferometry", "deflectometry", "refraction", "Faraday rotation", "phase", "density gradient"]
+
+["plasma-physics/diagnostics/scattering"]
+description = "Scattering diagnostics: Thomson scattering, collective scattering, laser scattering."
+keywords = ["Thomson scattering", "collective scattering", "laser scattering", "scattering spectrum"]
+
+["plasma-physics/diagnostics/spectroscopy"]
+description = "Plasma spectroscopy: emission, absorption, line broadening, X-ray spectroscopy."
+keywords = ["spectroscopy", "emission lines", "Stark broadening", "X-ray spectroscopy", "line ratio"]
+
+["plasma-physics/diagnostics/imaging"]
+description = "Imaging diagnostics: fast cameras, X-ray imaging, tomography, digital image correlation."
+keywords = ["imaging", "high-speed camera", "X-ray imaging", "radiography", "tomography", "image correlation"]
+
+["plasma-physics/diagnostics/particle-probes"]
+description = "Probe and particle diagnostics: Langmuir and magnetic probes, neutron and particle detectors."
+keywords = ["Langmuir probe", "magnetic probe", "B-dot", "neutron", "particle detector", "Rogowski"]
+
+["plasma-physics/diagnostics/synthetic"]
+description = "Synthetic diagnostics and forward models of measurements."
+keywords = ["synthetic diagnostic", "forward model", "ray tracing", "simulated measurement"]
+
+["plasma-physics/computational"]
+description = "Computational plasma physics: PIC, MHD and kinetic codes, numerical methods for plasmas."
+keywords = ["particle-in-cell", "PIC", "MHD code", "simulation", "numerical", "Gorgon", "kinetic code"]
+
+["plasma-physics/fusion"]
+description = "Fusion energy: reviews, roadmaps and reactor-level studies."
+keywords = ["fusion energy", "fusion reactor", "roadmap", "power plant"]
+
+["plasma-physics/fusion/magnetic-confinement"]
+description = "Magnetic confinement fusion: tokamaks and stellarators."
+keywords = ["tokamak", "stellarator", "magnetic confinement", "ITER", "divertor", "H-mode"]
+
+["plasma-physics/fusion/alternative-concepts"]
+description = "Alternative fusion concepts: FRC, PFRC, z-pinch fusion, magneto-inertial fusion."
+keywords = ["field-reversed configuration", "FRC", "PFRC", "magneto-inertial", "MIF", "sheared-flow z-pinch", "alternative concept"]
+
+["plasma-physics/accelerators"]
+description = "Plasma-based accelerators: plasma wakefield and laser-driven acceleration."
+keywords = ["plasma wakefield", "wakefield acceleration", "laser wakefield", "LWFA", "PWFA", "accelerator"]
+
+# --- Optics -------------------------------------------------------------------
+
+["optics"]
+description = "Optics in general."
+keywords = ["optics", "optical"]
+
+["optics/wave-optics"]
+description = "Wave optics: propagation through inhomogeneous media, diffraction, phase retrieval."
+keywords = ["wave optics", "propagation", "inhomogeneous media", "diffraction", "phase retrieval", "Fourier optics"]
+
+["optics/aero-optics"]
+description = "Aero-optics: optical distortion by turbulent flows."
+keywords = ["aero-optics", "optical distortion", "turbulent flow", "wavefront", "optical path difference"]
+
+["optics/imaging-systems"]
+description = "Optical imaging systems, cameras and lenses."
+keywords = ["imaging system", "lens", "camera", "optical design"]
+
+# --- Fluid dynamics -----------------------------------------------------------
+
+["fluid-dynamics"]
+description = "Fluid dynamics in general."
+keywords = ["fluid dynamics", "flow"]
+
+["fluid-dynamics/turbulence"]
+description = "Neutral-fluid turbulence: spectra, subgrid models, 2D and 3D turbulence."
+keywords = ["Navier-Stokes", "Kolmogorov", "subgrid", "2D turbulence", "energy spectrum", "fluid turbulence"]
+
+["fluid-dynamics/hypersonics"]
+description = "Hypersonic flows and vehicles."
+keywords = ["hypersonic", "shock layer", "re-entry", "scramjet"]
+
+# --- Space engineering --------------------------------------------------------
+
+["space-engineering"]
+description = "Space engineering in general."
+keywords = ["space", "spacecraft", "satellite"]
+
+["space-engineering/propulsion"]
+description = "Space propulsion: electric and plasma thrusters."
+keywords = ["propulsion", "thruster", "Hall thruster", "ion engine", "electric propulsion", "specific impulse"]
+
+["space-engineering/space-weather"]
+description = "Space weather: solar wind, magnetosphere, geomagnetic storms."
+keywords = ["space weather", "solar wind", "magnetosphere", "geomagnetic storm", "CME"]
+
+["space-engineering/power"]
+description = "Space power: radioisotope power systems and laser power transmission."
+keywords = ["radioisotope", "RTG", "power beaming", "laser power transmission", "photovoltaic"]
+
+["space-engineering/radiation-effects"]
+description = "Radiation effects and testing of components; ECSS standards."
+keywords = ["radiation testing", "total ionising dose", "single event effects", "ECSS", "displacement damage"]
+
+# --- Data science -------------------------------------------------------------
+
+["data-science"]
+description = "Data science in general."
+keywords = ["data science", "data analysis"]
+
+["data-science/machine-learning"]
+description = "Machine learning and AI methods."
+keywords = ["machine learning", "neural network", "deep learning", "AI"]
+
+["data-science/statistics-methods"]
+description = "Statistics and fitting methods: power laws, inference, uncertainty."
+keywords = ["statistics", "power law", "fitting", "Bayesian", "inference", "uncertainty"]
