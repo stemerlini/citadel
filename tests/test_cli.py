@@ -82,3 +82,31 @@ def test_reindex_reports_problems(capsys, library_root, config_file, index_file)
     (broken / "broken.md").write_text("junk")
     code, out = run(capsys, "reindex")
     assert code == 1 and "problem: optics/broken" in out
+
+
+def test_identify(capsys, monkeypatch, tmp_path, config_file):
+    from citadel import identify
+    from citadel.identify import Identification
+    from citadel.sources import Metadata
+
+    paper = tmp_path / "x.pdf"
+    paper.write_bytes(b"%PDF")
+    meta = Metadata(
+        title="Sudden viscous dissipation of compressing turbulence",
+        authors=["Davidovits, Seth"],
+        year=2016,
+        doi="10.1103/x",
+    )
+    monkeypatch.setattr(
+        identify,
+        "identify",
+        lambda path, http: Identification(meta, 0.97, "doi", ["doi 10.1103/x"]),
+    )
+    code, out = run(capsys, "identify", "--json", str(paper), str(tmp_path / "missing.pdf"))
+    first, second = json.loads(out)["results"]
+    assert code == 0 and first["confidence"] == 0.97
+    assert first["basename"] == "2016_SuddenViscousDissipationCompressingTurbulence_Davidovits"
+    assert first["citekey"] == "davidovits2016sudden"
+    assert second["error"] == "not a file"
+    code, out = run(capsys, "identify", "-v", str(paper))
+    assert "confidence 0.97" in out and "· doi 10.1103/x" in out

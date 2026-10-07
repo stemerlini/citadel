@@ -8,6 +8,7 @@
     citadel list            list references (filter by topic, tag, type, status)
     citadel search QUERY    full-text search
     citadel get CITEKEY     one reference, with its paths
+    citadel identify PDF…   find a PDF's metadata (dry run: nothing is moved)
     citadel --version
 
 Every command accepts --json, for agents and scripts.
@@ -214,6 +215,47 @@ def cmd_get(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_identify(args: argparse.Namespace) -> int:
+    from . import naming
+    from .config import Config
+    from .identify import identify
+    from .sources import Http
+
+    config = Config.load()
+    http = Http(config.metadata.contact_email)
+    results, lines = [], []
+    try:
+        for name in args.pdf:
+            path = Path(name).expanduser()
+            if not path.is_file():
+                results.append({"file": str(path), "error": "not a file"})
+                lines.append(f"{path}: not a file")
+                continue
+            found = identify(path, http)
+            item = {"file": str(path), **found.as_dict()}
+            meta = found.metadata
+            if meta:
+                item["basename"] = naming.basename(meta.year, meta.title, meta.authors)
+                item["citekey"] = naming.citekey(meta.year, meta.title, meta.authors)
+            results.append(item)
+            lines.append(f"{path.name}")
+            if meta:
+                lines.append(
+                    f"  -> {item['basename']}  [{found.method}, confidence {found.confidence:.2f}]"
+                )
+                lines.append(f"     {meta.title} ({meta.year or 'n.d.'})")
+                if meta.doi:
+                    lines.append(f"     doi {meta.doi}")
+            else:
+                lines.append("  -> not identified")
+            if args.verbose:
+                lines += [f"     · {e}" for e in found.evidence]
+    finally:
+        http.close()
+    emit({"results": results}, args.json, "\n".join(lines))
+    return 0
+
+
 def main(argv: list[str] | None = None) -> None:
     from . import __version__
 
@@ -257,6 +299,13 @@ def main(argv: list[str] | None = None) -> None:
     get = sub.add_parser("get", parents=[common], help="show one reference")
     get.add_argument("citekey")
     get.set_defaults(func=cmd_get)
+
+    ident = sub.add_parser(
+        "identify", parents=[common], help="find a PDF's metadata (dry run: nothing is moved)"
+    )
+    ident.add_argument("pdf", nargs="+")
+    ident.add_argument("-v", "--verbose", action="store_true", help="show what was tried")
+    ident.set_defaults(func=cmd_identify)
 
     args = parser.parse_args(argv)
     if args.command is None:

@@ -3,8 +3,9 @@
 > The maesters' library for an Omarchy scientist: drop a paper in, get it renamed,
 > catalogued, cited, converted to Markdown, and readable by you, Obsidian and agents.
 
-Status: Phase 1 done (2026-10-07): naming + citekeys, frontmatter records, SQLite/FTS5 index,
-`reindex`/`list`/`search`/`get`; 73 tests. Library at `~/Cloud/Personal-OneDrive/Citadel`.
+Status: Phase 2 done (2026-10-08): metadata identification (`citadel identify`), 120 tests.
+On a 20-PDF sample of the old library: 16 auto-filed, all correct; 4 to review; 0 confidently wrong.
+Library at `~/Cloud/Personal-OneDrive/Citadel`.
 
 ## Goals
 
@@ -283,6 +284,25 @@ through an editable mapping file, and `.bib`/`.docx`/`.png`/`.mp4` files go to
   warm walks take about 0.1 s (`--dir-cache-time 72h`). Commands refresh the index
   incrementally before answering. If that gets slow, the watcher service (Phase 3)
   can keep the index fresh instead.
+
+### Identification (Phase 2)
+
+How `citadel identify` decides, and why (each rule came from a real failure on the old library):
+
+- **Order:** DOI (PDF metadata, first pages, publisher cover) → arXiv → ISBN (first pages, then
+  the copyright page; Crossref, then OpenLibrary) → title search (Crossref bibliographic search
+  with the PDF's Author, then OpenAlex).
+- **Confidence = how well the candidate matches the page**, not which source found it:
+  title 65% (as phrases on the page or similarity to the guessed title), first author's
+  surname 25%, year near the top 10%.
+- **Title guess:** the biggest text block on the title page, measured by *median word height*
+  (maths/superscripts stretch line boxes). Publisher cover pages (IOP, JSTOR, ResearchGate)
+  and textless cover art are skipped. Scans are OCR'd (first two pages, Tesseract).
+- **Guards against confident mistakes:** a candidate whose title is only part of the page's
+  title is scaled down (an earlier, shorter paper by the same authors); the year only counts
+  near the top (citations are full of years); when a *different* work scores within 0.05
+  (two editions, conference vs journal version), confidence is capped at 0.75 → review.
+- Every attempt is logged in `evidence`, which the review queue and agents can show.
 
 ## Phases
 
