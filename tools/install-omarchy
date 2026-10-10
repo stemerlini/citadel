@@ -1,0 +1,114 @@
+#!/usr/bin/env bash
+# Install Citadel into Omarchy: `citadel` command, apps-menu entry with icon, the
+# inbox watcher (systemd user service) and the desktop conversion widget (shell
+# plugin). Safe to run again, e.g. after pulling changes or moving the project.
+# Your library on OneDrive is never touched. Undo with tools/uninstall-omarchy.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
+BIN="$HOME/.local/bin/citadel"
+ICON_DIR="$HOME/.local/share/icons/hicolor/256x256/apps"
+DESKTOP="$HOME/.local/share/applications/citadel.desktop"
+UNIT="$HOME/.config/systemd/user/citadel-watch.service"
+PLUGIN_ID="smerlini.citadel"
+PLUGIN_DIR="$HOME/.config/omarchy/plugins/$PLUGIN_ID"
+SHELL_JSON="$HOME/.config/omarchy/shell.json"
+
+step() { printf '\e[1;32m›\e[0m %s\n' "$*"; }
+note() { printf '\e[1;33m›\e[0m %s\n' "$*"; }
+
+# 1. Python environment
+if [[ ! -x $ROOT/.venv/bin/citadel ]]; then
+  step "Creating the Python environment"
+  python3 -m venv "$ROOT/.venv"
+  "$ROOT/.venv/bin/pip" install -q -e "$ROOT"
+fi
+
+# 2. Command on PATH
+if [[ -e $BIN && ! -L $BIN ]]; then
+  echo "$BIN exists and is not a link; move it away and run again." >&2
+  exit 1
+fi
+mkdir -p "$(dirname "$BIN")"
+ln -sfn "$ROOT/citadel" "$BIN"
+step "Command: citadel → $ROOT/citadel"
+
+# 3. Config and library folders (only what is missing)
+"$BIN" init >/dev/null
+step "Library: $("$BIN" doctor --json | jq -r .library)"
+
+# 4. Icon and apps-menu entry
+mkdir -p "$ICON_DIR" "$(dirname "$DESKTOP")"
+cp "$ROOT/assets/icon-256.png" "$ICON_DIR/citadel.png"
+gtk-update-icon-cache "$HOME/.local/share/icons/hicolor" &>/dev/null || true
+cat >"$DESKTOP" <<DESKTOP
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Citadel
+GenericName=Reference library
+Comment=Your papers and books: search, preview, cite, and convert to Markdown
+Exec=omarchy-launch-or-focus-tui --app-id=org.omarchy.citadel $BIN
+Icon=citadel
+Terminal=false
+Categories=Office;
+Keywords=papers;references;library;bibtex;citation;pdf;mendeley;zotero;
+StartupNotify=true
+DESKTOP
+chmod +x "$DESKTOP"
+step "Apps menu: Citadel (SUPER + SPACE)"
+
+# 5. Inbox watcher (systemd user service), written for this project's location
+mkdir -p "$(dirname "$UNIT")"
+new_unit="$(sed "s|^ExecStart=.*|ExecStart=$ROOT/.venv/bin/citadel watch|" \
+  "$ROOT/omarchy/citadel-watch.service")"
+if [[ ! -f $UNIT ]] || [[ "$(cat "$UNIT")" != "$new_unit" ]]; then
+  printf '%s\n' "$new_unit" >"$UNIT"
+  systemctl --user daemon-reload
+fi
+systemctl --user enable citadel-watch.service &>/dev/null
+systemctl --user restart citadel-watch.service  # picks up new code too
+step "Inbox watcher: $(systemctl --user is-active citadel-watch.service) (journalctl --user -u citadel-watch -f)"
+
+# 6. Desktop widget (shell plugin). Omarchy rejects symlinked plugin folders, so
+# the files are copied; run this script again after changing them.
+[[ -L $PLUGIN_DIR ]] && rm "$PLUGIN_DIR"
+mkdir -p "$PLUGIN_DIR"
+changed=false
+for file in manifest.json Widget.qml; do
+  if ! cmp -s "$ROOT/omarchy/plugin/$PLUGIN_ID/$file" "$PLUGIN_DIR/$file"; then
+    cp "$ROOT/omarchy/plugin/$PLUGIN_ID/$file" "$PLUGIN_DIR/$file"
+    changed=true
+  fi
+done
+omarchy plugin validate "$PLUGIN_DIR"
+if command -v omarchy-shell &>/dev/null && omarchy-shell shell ping &>/dev/null; then
+  omarchy-shell shell rescanPlugins >/dev/null
+  if omarchy plugin list --json | jq -e --arg id "$PLUGIN_ID" \
+      'any(.[]; .id == $id and .enabled == true)' >/dev/null; then
+    if $changed; then
+      omarchy restart shell &>/dev/null || true  # loaded panels keep old code
+      step "Desktop widget: updated (shell restarted)"
+    else
+      step "Desktop widget: enabled and up to date"
+    fi
+  else
+    [[ -f $SHELL_JSON ]] && cp "$SHELL_JSON" "$SHELL_JSON.bak.$(date +%s)"
+    omarchy plugin enable "$PLUGIN_ID" >/dev/null
+    step "Desktop widget: enabled (shows bottom-right while converting)"
+  fi
+else
+  note "Desktop widget: copied; enable it with: omarchy plugin enable $PLUGIN_ID"
+fi
+
+# 7. PDF -> Markdown (optional, several GB): not installed by this script.
+if [[ ! -x $ROOT/.venv-convert/bin/python ]]; then
+  note "PDF → Markdown is not set up yet: see README (\"PDF → Markdown\")."
+elif ! command -v llama-server &>/dev/null; then
+  note "PDF → Markdown needs llama.cpp: omarchy pkg add llama-cpp ggml-cuda"
+else
+  step "PDF → Markdown: ready (Marker + llama.cpp)"
+fi
+
+echo
+echo "Done. Open Citadel from the apps menu or by typing: citadel"

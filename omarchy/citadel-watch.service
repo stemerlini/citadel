@@ -1,7 +1,6 @@
 # Citadel inbox watcher: files whatever lands in the library's _inbox/.
-# Install:   cp omarchy/citadel-watch.service ~/.config/systemd/user/
-#            systemctl --user daemon-reload
-#            systemctl --user enable --now citadel-watch.service
+# Installed by tools/install-omarchy, which writes ExecStart for the project's
+# real location.
 # Logs:      journalctl --user -u citadel-watch -f
 
 [Unit]

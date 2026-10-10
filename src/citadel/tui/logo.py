@@ -102,3 +102,18 @@ def banner() -> Text:
         if i + 1 < max(len(castle), len(word)):
             out.append("\n")
     return out
+
+
+def save_png(rows: list[str], path, size: int = 256) -> None:
+    """The sprite as a square PNG with crisp pixels (for the apps-menu icon)."""
+    from PIL import Image, ImageColor
+
+    side = max(len(rows), len(rows[0])) + 2  # one pixel of margin all round
+    image = Image.new("RGBA", (side, side), (0, 0, 0, 0))
+    top = (side - len(rows)) // 2
+    left = (side - len(rows[0])) // 2
+    for y, row in enumerate(rows):
+        for x, ch in enumerate(row):
+            if ch in PALETTE:
+                image.putpixel((left + x, top + y), ImageColor.getrgb(PALETTE[ch]))
+    image.resize((size, size), Image.NEAREST).save(path)

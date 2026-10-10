@@ -4,14 +4,17 @@ A reference library for scientists, in the terminal. Drop papers in an inbox and
 Citadel renames, catalogues and converts them, cites them, and serves them to
 agents. See [PLAN.md](PLAN.md) for the design and the phases.
 
-## Setup
+## Install (Omarchy)
 
 ```sh
-python3 -m venv .venv
-.venv/bin/pip install -e '.[dev]'
-.venv/bin/citadel init      # writes data/config.toml and creates the library folders
-.venv/bin/citadel doctor    # checks the setup
+tools/install-omarchy     # safe to re-run after pulling changes
 ```
+
+This sets up the Python environment, the `citadel` command (`~/.local/bin`), an
+apps-menu entry with icon, the inbox watcher (systemd user service
+`citadel-watch`) and the desktop conversion widget (shell plugin
+`smerlini.citadel`). `tools/uninstall-omarchy` removes all of it; the library is
+never touched.
 
 The library defaults to `~/Cloud/Personal-OneDrive/Citadel`; change `library` in
 `data/config.toml` (or set `CITADEL_LIBRARY`). The topic tree lives in the
@@ -30,12 +33,7 @@ citadel convert --all                                # models download on the fi
 ```
 
 While converting, a card on the desktop shows the progress and the GPU at work
-(an Omarchy shell plugin):
-
-```sh
-cp -r omarchy/plugin/smerlini.citadel ~/.config/omarchy/plugins/
-omarchy-shell shell rescanPlugins && omarchy plugin enable smerlini.citadel
-```
+(installed by `tools/install-omarchy`).
 
 ## The app
 
@@ -62,13 +60,6 @@ citadel add arxiv:2101.12345 | doi:10.… | paper.pdf
 citadel convert [CITEKEY…] [--all] [--force] [--ocr]
 citadel search "kelvin helmholtz" ; citadel get CITEKEY
 citadel cite CITEKEY… [--format reference|bibtex|key]
-```
-
-To file the inbox automatically, install the watcher (a systemd user service):
-
-```sh
-cp omarchy/citadel-watch.service ~/.config/systemd/user/
-systemctl --user daemon-reload && systemctl --user enable --now citadel-watch.service
 ```
 
 Every command takes `--json`.

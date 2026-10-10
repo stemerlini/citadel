@@ -1,0 +1,3 @@
+#!/usr/bin/env sh
+# Launch Citadel from the project's own virtualenv.
+exec "$(dirname "$(readlink -f "$0")")/.venv/bin/citadel" "$@"

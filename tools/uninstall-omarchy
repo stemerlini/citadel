@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# Remove what tools/install-omarchy added. The library, its index and the
+# project folder are not touched.
+set -euo pipefail
+
+PLUGIN_ID="smerlini.citadel"
+PLUGIN_DIR="$HOME/.config/omarchy/plugins/$PLUGIN_ID"
+UNIT="$HOME/.config/systemd/user/citadel-watch.service"
+
+if [[ -f $UNIT ]]; then
+  systemctl --user disable --now citadel-watch.service &>/dev/null || true
+  rm "$UNIT"
+  systemctl --user daemon-reload
+fi
+
+if omarchy plugin list --json 2>/dev/null | jq -e --arg id "$PLUGIN_ID" \
+    'any(.[]; .id == $id and .enabled == true)' >/dev/null; then
+  omarchy plugin disable "$PLUGIN_ID"
+fi
+# Only remove the folder if it holds exactly the files the installer copied.
+if [[ -d $PLUGIN_DIR ]] && [[ -z $(find "$PLUGIN_DIR" -type f ! -name manifest.json ! -name Widget.qml) ]]; then
+  rm -r "$PLUGIN_DIR"
+fi
+command -v omarchy-shell &>/dev/null && omarchy-shell shell rescanPlugins &>/dev/null || true
+
+rm -f "$HOME/.local/share/applications/citadel.desktop"
+rm -f "$HOME/.local/share/icons/hicolor/256x256/apps/citadel.png"
+gtk-update-icon-cache "$HOME/.local/share/icons/hicolor" &>/dev/null || true
+[[ -L $HOME/.local/bin/citadel ]] && rm "$HOME/.local/bin/citadel"
+
+echo "Citadel removed from Omarchy. Your library and the project folder are untouched."
