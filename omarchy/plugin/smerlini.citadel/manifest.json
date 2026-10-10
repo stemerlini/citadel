@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "id": "smerlini.citadel",
+  "name": "Citadel",
+  "version": "0.1.0",
+  "author": "smerlini",
+  "license": "MIT",
+  "description": "While Citadel converts papers to Markdown, a card on the desktop shows the progress and the GPU at work.",
+  "kinds": [
+    "panel"
+  ],
+  "keepLoaded": true,
+  "entryPoints": {
+    "panel": "Widget.qml"
+  }
+}

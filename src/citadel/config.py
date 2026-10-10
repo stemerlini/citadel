@@ -40,6 +40,8 @@ class MetadataConfig:
 class ConvertConfig:
     python: str = ".venv-convert/bin/python"  # Marker's own environment, relative to the app root
     device: str = "cuda"  # cuda | cpu
+    ocr: str = "auto"  # auto (only PDFs whose text layer garbles maths) | always | never
+    auto: bool = True  # the inbox watcher converts newly filed papers by itself
 
 
 @dataclass
@@ -122,6 +124,11 @@ contact_email = ""
 python = ".venv-convert/bin/python"
 # cuda or cpu
 device = "cuda"
+# Read pages with OCR instead of the PDF's text layer: "auto" does it only for PDFs
+# whose text layer garbles maths (many APS/AIP papers); "always" is ~6x slower.
+ocr = "auto"
+# Let the inbox watcher convert newly filed papers to Markdown on its own.
+auto = true
 """
 
 

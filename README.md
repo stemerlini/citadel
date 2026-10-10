@@ -17,6 +17,26 @@ The library defaults to `~/Cloud/Personal-OneDrive/Citadel`; change `library` in
 `data/config.toml` (or set `CITADEL_LIBRARY`). The topic tree lives in the
 library's `topics.toml`.
 
+## PDF → Markdown (Marker, on the GPU)
+
+Marker runs in its own environment, and its OCR model is served by llama.cpp:
+
+```sh
+omarchy pkg add llama-cpp ggml-cuda                  # official Arch packages
+mise install python@3.13
+$(mise where python@3.13)/bin/python3 -m venv .venv-convert
+.venv-convert/bin/pip install marker-pdf
+citadel convert --all                                # models download on the first run
+```
+
+While converting, a card on the desktop shows the progress and the GPU at work
+(an Omarchy shell plugin):
+
+```sh
+cp -r omarchy/plugin/smerlini.citadel ~/.config/omarchy/plugins/
+omarchy-shell shell rescanPlugins && omarchy plugin enable smerlini.citadel
+```
+
 ## Daily use
 
 ```sh
@@ -24,6 +44,7 @@ citadel ingest              # file what is in <library>/_inbox (or send it to re
 citadel review              # what is waiting, with Citadel's proposal
 citadel review accept NAME [--topic T] [--doi D]
 citadel add arxiv:2101.12345 | doi:10.… | paper.pdf
+citadel convert [CITEKEY…] [--all] [--force] [--ocr]
 citadel search "kelvin helmholtz" ; citadel get CITEKEY
 ```
 

@@ -13,6 +13,7 @@
     citadel watch           keep ingesting the inbox (for the systemd user service)
     citadel add X           add a PDF, doi:…, or arxiv:… to the library
     citadel review          list items waiting for review; accept or reject them
+    citadel convert         convert filed PDFs to Markdown on the GPU (Marker)
     citadel --version
 
 Every command accepts --json, for agents and scripts.
@@ -311,17 +312,43 @@ def cmd_ingest(args: argparse.Namespace) -> int:
     return 1 if any(r.status == "error" for r in results) else 0
 
 
+def converted_line(result) -> str:
+    if result.ok:
+        mode = " with OCR" if result.ocr else ""
+        return (
+            f"md      {result.citekey}: {result.pages} pages in {result.seconds:.0f}s{mode}"
+            f", {result.figures} figures"
+        )
+    return f"error   {result.citekey}: {result.error}"
+
+
 def cmd_watch(args: argparse.Namespace) -> int:
     import time
+
+    from .convert import Converter, ConvertError
 
     session = Session()
     interval = args.interval or session.config.ingest.watch_interval
     print(f"Watching {session.library.inbox} every {interval}s (Ctrl+C to stop)", flush=True)
+
+    def log(line: str) -> None:
+        print(f"{time.strftime('%H:%M:%S')} {line}", flush=True)
+
     try:
         while True:
+            filed = []
             for result in session.ingester.process_inbox():
-                stamp = time.strftime("%H:%M:%S")
-                print(f"{stamp} {result_line(result)}", flush=True)
+                log(result_line(result))
+                if result.status == "filed":
+                    filed.append(result.citekey)
+            if filed and session.config.convert.auto:
+                converter = Converter(session.index, session.config)
+                try:
+                    converter.run(
+                        converter.pending(filed), on_result=lambda r: log(converted_line(r))
+                    )
+                except ConvertError as error:
+                    log(f"error   conversion: {error}")
             time.sleep(interval)
     except KeyboardInterrupt:
         return 0
@@ -425,6 +452,47 @@ def add_doi(session, doi: str, topic: str, source: str):
         topic,
         confidence,
     )
+
+
+def cmd_convert(args: argparse.Namespace) -> int:
+    from .convert import Converter, ConvertError
+
+    session = Session()
+    try:
+        converter = Converter(session.index, session.config)
+        if args.ocr:
+            session.config.convert.ocr = "always"
+        jobs = converter.pending(args.citekeys or None, force=args.force, limit=args.limit)
+        if not jobs:
+            emit({"results": []}, args.json, "Nothing to convert.")
+            return 0
+        if not args.citekeys and not args.all:
+            pages = sum(j.pages for j in jobs)
+            emit(
+                {"pending": [j.citekey for j in jobs], "pages": pages},
+                args.json,
+                f"{len(jobs)} references ({pages} pages) have no Markdown yet.\n"
+                "Run `citadel convert --all` to convert them, or name citekeys.",
+            )
+            return 0
+        if not args.json:
+            print(
+                f"Converting {len(jobs)} references ({sum(j.pages for j in jobs)} pages)…",
+                flush=True,
+            )
+        try:
+            results = converter.run(
+                jobs,
+                on_result=None if args.json else lambda r: print(converted_line(r), flush=True),
+            )
+        except ConvertError as error:
+            emit({"error": str(error)}, args.json, f"Error: {error}")
+            return 1
+    finally:
+        session.close()
+    if args.json:
+        emit({"results": [r.as_dict() for r in results]}, True, "")
+    return 0 if all(r.ok for r in results) else 1
 
 
 def cmd_review(args: argparse.Namespace) -> int:
@@ -534,6 +602,16 @@ def main(argv: list[str] | None = None) -> None:
     review.add_argument("--doi", default="", help="accept: take the metadata from this DOI")
     review.add_argument("--type", default="", help="accept: document type (book, article…)")
     review.set_defaults(func=cmd_review)
+
+    convert = sub.add_parser(
+        "convert", parents=[common], help="convert filed PDFs to Markdown (Marker, GPU)"
+    )
+    convert.add_argument("citekeys", nargs="*", help="only these references")
+    convert.add_argument("--all", action="store_true", help="every reference without Markdown")
+    convert.add_argument("--force", action="store_true", help="also redo converted ones")
+    convert.add_argument("--ocr", action="store_true", help="read every page with OCR")
+    convert.add_argument("--limit", type=int, help="at most this many references")
+    convert.set_defaults(func=cmd_convert)
 
     args = parser.parse_args(argv)
     if args.command is None:

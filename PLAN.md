@@ -3,9 +3,9 @@
 > The maesters' library for an Omarchy scientist: drop a paper in, get it renamed,
 > catalogued, cited, converted to Markdown, and readable by you, Obsidian and agents.
 
-Status: Phase 3 done (2026-10-10): ingest, review queue, `add`, inbox watcher; 148 tests.
-On the 20-PDF sample: 9 filed automatically (all correct), 11 to review — every real paper
-in review already proposes the right topic. Library at `~/Cloud/Personal-OneDrive/Citadel`.
+Status: Phase 4 done (2026-10-10): GPU conversion to Markdown + desktop widget; 168 tests.
+Phase 3: 9/20 sample papers filed automatically (all correct), the rest to review with
+the right proposal. Library at `~/Cloud/Personal-OneDrive/Citadel`.
 
 ## Goals
 
@@ -237,6 +237,43 @@ left out on purpose.
 - `citadel watch` + `omarchy/citadel-watch.service` (systemd user unit, after the OneDrive
   mount). If the mount is down, nothing is touched and the index is kept.
 
+### Conversion (Phase 4)
+
+- **Engine:** Marker 2.0 in `.venv-convert` (Python 3.13 via mise). Its OCR/layout model
+  (`surya-ocr-2`, GGUF, ~1.4 GB) is served by **llama.cpp** (`llama-cpp` + `ggml-cuda`
+  from the Arch repos), started and stopped by the worker, so the GPU (~4.4 GB) is held
+  only while converting. Chosen over vLLM-in-Docker (needs the `docker` group, an AUR
+  toolkit, a ~10 GB image) and Marker 1.x (pinned, older models).
+- **Worker protocol:** `convert_worker.py` loads the models once per run (~5 s) and reads
+  JSON-line jobs on stdin; Citadel reads events through one reader thread and a queue.
+- **OCR only where needed:** many APS/AIP PDFs have text layers with mis-encoded maths
+  fonts (`¼ ð Þ`), which garble inline maths. Those (detected from the text layer) are
+  read with `force_ocr`, which yields clean inline LaTeX at ~6x the time. `convert.ocr`
+  = auto | always | never.
+- **Speed on the RTX 4060 Ti:** ~2.5 s/page (clean text layer, short paper) to ~13 s/page
+  (OCR, or long figure-heavy reviews). The old library is 715 PDFs / 40,065 pages
+  (72 books over 150 pages), i.e. days of GPU time: migration should convert in batches
+  (overnight), papers before books.
+- **Clean-up (`clean.py`):** page anchors and in-PDF links removed, citation brackets and
+  equation references unescaped, equation numbers turned into `\tag{}`, stray one-symbol
+  display maths made inline, figures linked under `figures/`, the duplicated title dropped,
+  heading levels rebuilt from section numbers. Maths is never rewritten.
+- **Safety:** figures are written to `.figures.new` and swapped in after the record is
+  updated; a failed conversion leaves the reference untouched. Notes outside the full-text
+  markers are never touched (re-conversion included).
+- **Watcher:** after filing, newly filed papers are converted automatically (`convert.auto`).
+
+### Desktop widget (Phase 4)
+
+`omarchy/plugin/smerlini.citadel`: an Omarchy shell `panel` plugin on the layer-shell
+**bottom** layer (above the wallpaper, under every window; no input), bottom-right. It
+shows while converting and fades out a minute after: run progress, the paper being
+converted, GPU load sparkline, VRAM, temperature, power, papers/min, s/page, ETA and how
+much of the library is in Markdown. Data: `$XDG_RUNTIME_DIR/citadel/status.json`, written
+about once a second by `status.py` (nvidia-smi samples). `omarchy-shell citadel state`
+answers converting | done | hidden. Install by copying (Omarchy rejects symlinked plugin
+folders), then `omarchy plugin enable smerlini.citadel`.
+
 ## TUI (Textual)
 
 - **Left:** topic tree + virtual views. **Centre:** reference table (year, short title,
@@ -332,7 +369,7 @@ How `citadel identify` decides, and why (each rule came from a real failure on t
 | 1 | Core model: naming + citekey rules, frontmatter read/write, SQLite index + FTS5, `reindex` | Round-trip tests on sample records |
 | 2 | Metadata: DOI/arXiv/ISBN extraction, Crossref/arXiv/OpenAlex/OpenLibrary clients (cached, mocked in tests) | 20 real PDFs from the old library identified correctly |
 | 3 | Ingest: `add`, inbox processing, local decider, `_review/`, polling watcher service | Drop a PDF → filed reference folder |
-| 4 | Conversion: Marker queue + Markdown post-processor + figures + OCR | Equation-heavy papers (Braginskii, Verma) render well in Obsidian and the TUI |
+| 4 | Conversion: Marker worker + clean-up + figures + selective OCR; desktop GPU widget | Equation-heavy papers render well; widget shows live progress |
 | 5 | TUI: list, tree, details, Space preview, search, cite/copy, review queue | Daily use instead of a file manager |
 | 6 | Agents: `--json` CLI, MCP server, Claude Code skill, `library.bib` | Claude Code can find, read and cite a paper end to end |
 | 7 | Obsidian: `link`, `note`, `cite --resolve`, vault path config | A vault report cites a paper and opens its PDF |
