@@ -1,6 +1,6 @@
 """Entry point: `citadel` or `python -m citadel`.
 
-    citadel                 open the app (Phase 5; for now prints a pointer)
+    citadel                 open the app
     citadel init            create the config and the library folders that are missing
     citadel doctor          check paths, config, library layout and the converter
     citadel topics          list the topic tree
@@ -14,6 +14,7 @@
     citadel add X           add a PDF, doi:…, or arxiv:… to the library
     citadel review          list items waiting for review; accept or reject them
     citadel convert         convert filed PDFs to Markdown on the GPU (Marker)
+    citadel cite KEY…       formatted references, BibTeX entries or citekeys
     citadel --version
 
 Every command accepts --json, for agents and scripts.
@@ -26,6 +27,15 @@ import json
 import shutil
 import sys
 from pathlib import Path
+
+
+def run_app() -> None:
+    # textual-image must probe the terminal before Textual takes over stdin.
+    import textual_image.widget  # noqa: F401
+
+    from .tui.app import Citadel
+
+    Citadel().run()
 
 
 def emit(data: dict, as_json: bool, text: str) -> None:
@@ -356,102 +366,15 @@ def cmd_watch(args: argparse.Namespace) -> int:
         session.close()
 
 
-def parse_target(target: str) -> tuple[str, str]:
-    """('pdf'|'doi'|'arxiv', value) for what `citadel add` was given."""
-    from .identifiers import ARXIV_NEW, ARXIV_OLD, clean_doi, find_dois
-
-    lowered = target.lower()
-    if lowered.startswith("doi:") or (find_dois(target) and not Path(target).exists()):
-        return "doi", clean_doi(target[4:] if lowered.startswith("doi:") else target)
-    if lowered.startswith("arxiv:") or "arxiv.org/" in lowered:
-        for pattern in (ARXIV_NEW, ARXIV_OLD):
-            match = pattern.search(target if "arxiv" in lowered else f"arxiv:{target}")
-            if match:
-                return "arxiv", match.group(1)
-    return "pdf", target
-
-
 def cmd_add(args: argparse.Namespace) -> int:
-    import tempfile
-
-    from . import sources
-
-    kind, value = parse_target(args.target)
     source = f"agent:{args.agent}" if args.agent else "add"
     session = Session()
     try:
-        ingester = session.ingester
-        if kind == "pdf":
-            path = Path(value).expanduser()
-            if not path.is_file():
-                emit({"error": f"not a file: {path}"}, args.json, f"Not a file: {path}")
-                return 1
-            result = ingester.ingest(
-                path, source=source, keep_source=not args.move, topic=args.topic
-            )
-        elif kind == "arxiv":
-            meta = sources.arxiv(session.http, value)
-            if meta is None:
-                emit({"error": f"arXiv has no {value}"}, args.json, f"arXiv has no {value}.")
-                return 1
-            if meta.doi:  # the published version has richer metadata
-                published = sources.crossref(session.http, meta.doi)
-                if published:
-                    published.arxiv = value
-                    meta = published
-            with tempfile.TemporaryDirectory(prefix="citadel-add-") as tmp:
-                pdf = Path(tmp) / f"{value.replace('/', '_')}.pdf"
-                session.http.download(f"https://arxiv.org/pdf/{value}", pdf)
-                result = ingester.ingest(pdf, source=source, known=meta, topic=args.topic)
-        else:
-            result = add_doi(session, value, args.topic, source)
-        if result.status == "filed":
-            session.index.reindex()
+        result = session.ingester.add(args.target, topic=args.topic, source=source, move=args.move)
     finally:
         session.close()
     emit(result.as_dict(), args.json, result_line(result))
     return 0 if result.status in ("filed", "review") else 1
-
-
-def add_doi(session, doi: str, topic: str, source: str):
-    """A reference from a DOI alone (no PDF): filed only when the topic is clear."""
-    from . import sources
-    from .ingest import Result
-
-    label = f"doi:{doi}"
-    meta = sources.crossref(session.http, doi)
-    if meta is None:
-        return Result(label, "error", "Crossref does not know this DOI")
-    existing = session.index.find_doi(meta.doi)
-    if existing:
-        return Result(label, "error", f"already in the library as {existing}")
-    sources.enrich(session.http, meta)
-    confidence = 1.0
-    if not topic:
-        found = session.ingester.classifier.classify(meta.title, meta.abstract, meta.journal)
-        topic, confidence = found.topic, found.confidence
-        if not topic or confidence < session.config.ingest.topic_threshold:
-            hint = f" (best guess: {topic}, {confidence:.2f})" if topic else ""
-            return Result(
-                doi,
-                "error",
-                f"topic unclear{hint}: add it again with --topic",
-                title=meta.title,
-                topic=topic,
-                topic_confidence=confidence,
-            )
-    ref = session.ingester.file_metadata_only(meta, topic, source)
-    return Result(
-        doi,
-        "filed",
-        "metadata only (no PDF)",
-        ref.citekey,
-        ref.folder,
-        ref.title,
-        1.0,
-        topic,
-        confidence,
-    )
 
 
 def cmd_convert(args: argparse.Namespace) -> int:
@@ -493,6 +416,29 @@ def cmd_convert(args: argparse.Namespace) -> int:
     if args.json:
         emit({"results": [r.as_dict() for r in results]}, True, "")
     return 0 if all(r.ok for r in results) else 1
+
+
+def cmd_cite(args: argparse.Namespace) -> int:
+    from . import cite, edit
+
+    index = open_index()
+    entries, missing = [], []
+    try:
+        for key in args.citekeys:
+            try:
+                ref, _ = edit.load(index, key)
+            except edit.EditError:
+                missing.append(key)
+                continue
+            entries.append({"citekey": key, "text": cite.format_ref(ref, args.format)})
+    finally:
+        index.close()
+    joiner = "\n" if args.format == "bibtex" else "\n\n" if args.format == "reference" else "\n"
+    text = joiner.join(e["text"].rstrip("\n") for e in entries)
+    if missing:
+        text += ("\n" if text else "") + f"Unknown: {', '.join(missing)}"
+    emit({"format": args.format, "entries": entries, "missing": missing}, args.json, text)
+    return 1 if missing else 0
 
 
 def cmd_review(args: argparse.Namespace) -> int:
@@ -613,9 +559,16 @@ def main(argv: list[str] | None = None) -> None:
     convert.add_argument("--limit", type=int, help="at most this many references")
     convert.set_defaults(func=cmd_convert)
 
+    cite_parser = sub.add_parser("cite", parents=[common], help="cite references")
+    cite_parser.add_argument("citekeys", nargs="+")
+    cite_parser.add_argument(
+        "--format", default="reference", choices=["reference", "bibtex", "key"]
+    )
+    cite_parser.set_defaults(func=cmd_cite)
+
     args = parser.parse_args(argv)
     if args.command is None:
-        print("The Citadel TUI arrives in Phase 5. Try `citadel doctor` or `citadel --help`.")
+        run_app()
         sys.exit(0)
     sys.exit(args.func(args))
 

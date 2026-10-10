@@ -47,9 +47,13 @@ def test_topics_text_is_indented(capsys, library_root, config_file):
     assert "\n    pulsed-power/" in out
 
 
-def test_no_command_points_to_help(capsys):
-    code, out = run(capsys)
-    assert code == 0 and "citadel doctor" in out
+def test_no_command_opens_the_app(capsys, monkeypatch):
+    import citadel.__main__ as cli
+
+    opened = []
+    monkeypatch.setattr(cli, "run_app", lambda: opened.append(True))
+    code, _ = run(capsys)
+    assert code == 0 and opened == [True]
 
 
 def test_reindex_list_search_get(capsys, library_root, config_file, index_file):
@@ -125,6 +129,19 @@ def test_identify(capsys, monkeypatch, tmp_path, config_file):
     ],
 )
 def test_parse_target(target, expected):
-    from citadel.__main__ import parse_target
+    from citadel.ingest import parse_target
 
     assert parse_target(target) == expected
+
+
+def test_cite(capsys, library_root, config_file, index_file):
+    from conftest import file_ref, make_ref
+
+    run(capsys, "init")
+    file_ref(library_root, make_ref())
+    code, out = run(capsys, "cite", "verma2004statistical", "--format", "bibtex")
+    assert code == 0 and out.startswith("@article{verma2004statistical,")
+    code, out = run(capsys, "cite", "verma2004statistical", "nobody", "--json")
+    data = json.loads(out)
+    assert code == 1 and data["missing"] == ["nobody"]
+    assert data["entries"][0]["text"].startswith("Verma, M. K. (2004).")

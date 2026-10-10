@@ -37,6 +37,21 @@ cp -r omarchy/plugin/smerlini.citadel ~/.config/omarchy/plugins/
 omarchy-shell shell rescanPlugins && omarchy plugin enable smerlini.citadel
 ```
 
+## The app
+
+```sh
+citadel          # opens the TUI
+```
+
+| Key | Action | Key | Action |
+|---|---|---|---|
+| `Space` | preview: PDF page + details (`←/→` pages, `Tab` full text) | `Enter` | open the PDF |
+| `/` | search titles, authors, abstracts, tags and full text | `Esc` | clear the search |
+| `c` / `b` / `k` | copy the reference / BibTeX / citekey | `r` | unread → reading → read |
+| `e` | edit metadata (`Ctrl+S` saves) | `t` | move to another topic |
+| `m` | convert to Markdown (GPU) | `a` | add a PDF, `doi:…` or `arxiv:…` |
+| `i` | review queue (`a` accept, `t` other topic, `d` DOI, `x` reject) | `?` | about |
+
 ## Daily use
 
 ```sh
@@ -46,6 +61,7 @@ citadel review accept NAME [--topic T] [--doi D]
 citadel add arxiv:2101.12345 | doi:10.… | paper.pdf
 citadel convert [CITEKEY…] [--all] [--force] [--ocr]
 citadel search "kelvin helmholtz" ; citadel get CITEKEY
+citadel cite CITEKEY… [--format reference|bibtex|key]
 ```
 
 To file the inbox automatically, install the watcher (a systemd user service):

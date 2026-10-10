@@ -3,9 +3,8 @@
 > The maesters' library for an Omarchy scientist: drop a paper in, get it renamed,
 > catalogued, cited, converted to Markdown, and readable by you, Obsidian and agents.
 
-Status: Phase 4 done (2026-10-10): GPU conversion to Markdown + desktop widget; 168 tests.
-Phase 3: 9/20 sample papers filed automatically (all correct), the rest to review with
-the right proposal. Library at `~/Cloud/Personal-OneDrive/Citadel`.
+Status: Phase 5 done (2026-10-10): the TUI, citations (`cite`), editing and moving references;
+192 tests. Library at `~/Cloud/Personal-OneDrive/Citadel`.
 
 ## Goals
 
@@ -310,6 +309,26 @@ other artefacts. Citadel never writes into it unless asked, and it never copies 
   reference list, and `library.bib` makes the same keys work with Pandoc and LaTeX.
 - **Optional, later:** a read-only Obsidian Base view or a small community-plugin
   bridge, if you find the links above are not enough.
+
+### As built (Phase 5)
+
+- **Layout:** top bar (castle logo, live conversion progress from `status.json`, library
+  stats with inbox/review counts); sidebar tree with views (All, Recently added, Unread,
+  Reading, Without Markdown) and the topic tree with counts; reference table (status mark,
+  year, title, first author, type, topic, PDF/Markdown icons; columns drop when narrow);
+  detail pane (authors, venue, DOI, abstract or the search snippet, citekey, tags).
+- **Keys:** Space preview (page image via `pdftoppm`, cached; ←/→ pages; Tab full text),
+  Enter open PDF, `/` full-text search, `c`/`b`/`k` copy reference/BibTeX/citekey
+  (wl-copy, OSC 52 fallback), `r` status, `e` edit, `t` move topic, `m` convert, `a` add,
+  `i` review queue (accept / other topic / DOI / reject / preview), `?` about.
+- Background work (add, accept, reject, convert) runs in worker threads with their own
+  database connections; the UI reloads when they finish. Accepted or added papers are
+  converted automatically when `convert.auto` is on.
+- **Citations (`cite.py`, `citadel cite`):** APA-like references and BibTeX (types mapped,
+  specials escaped, maths kept in titles, capitals protected, article numbers as pages).
+- **Editing (`edit.py`):** metadata, status, tags, and moving a reference to another topic
+  (the folder moves; basename and citekey never change).
+- Obsidian keys (`l` link, `n` literature note) wait for the vault (Phase 7).
 
 ## Agent interface
 

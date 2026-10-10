@@ -1,0 +1,194 @@
+Screen {
+    background: $background;
+}
+
+/* -- top bar: brand · activity · library stats ---------------------------- */
+
+#topbar {
+    height: 4;
+    background: $panel;
+}
+#brand-logo {
+    width: 16;
+    margin: 0 1 0 2;
+}
+#brand {
+    width: 20;
+    padding: 1 2 0 0;
+}
+#brand-name {
+    color: $primary;
+    text-style: bold;
+}
+#brand-tagline {
+    color: $text-muted;
+}
+#activity {
+    width: 1fr;
+    padding: 1 2 0 0;
+}
+#stats {
+    width: auto;
+    padding: 1 2 0 2;
+}
+
+/* -- body ----------------------------------------------------------------- */
+
+#body {
+    height: 1fr;
+}
+.pane-title {
+    height: 1;
+    padding: 0 1;
+    color: $primary;
+    text-style: bold;
+    margin-bottom: 1;
+}
+#sidebar {
+    width: 34;
+    padding: 1 0 0 1;
+    border-right: solid $primary 20%;
+}
+#topics {
+    height: 1fr;
+    background: $background;
+    padding: 0;
+}
+#topics:focus > .tree--cursor {
+    background: $primary 30%;
+}
+#main {
+    padding: 1 1 0 1;
+}
+#search {
+    margin-bottom: 1;
+}
+#refs {
+    height: 1fr;
+    background: $background;
+}
+#refs > .datatable--header {
+    background: $panel;
+    color: $text-muted;
+    text-style: bold;
+}
+#empty {
+    height: 1fr;
+    content-align: center middle;
+    text-align: center;
+    color: $text-muted;
+}
+#details {
+    height: 8;
+    padding: 1 1 0 1;
+    border-top: solid $primary 20%;
+}
+
+/* -- modals --------------------------------------------------------------- */
+
+ModalScreen {
+    align: center middle;
+    background: $background 70%;
+}
+.dialog {
+    width: 80;
+    height: auto;
+    max-height: 90%;
+    padding: 1 2;
+    background: $surface;
+    border: round $primary;
+}
+.dialog.wide {
+    width: 100;
+}
+.dialog.about {
+    width: 84;
+}
+#about-logo {
+    margin-bottom: 1;
+}
+.title {
+    text-style: bold;
+    color: $primary;
+    width: 1fr;
+}
+.subtitle {
+    color: $text-muted;
+    margin-bottom: 1;
+}
+.section {
+    margin-top: 1;
+    text-style: bold;
+    color: $secondary;
+}
+.field-label {
+    margin-top: 1;
+    color: $text-muted;
+}
+.footnote {
+    margin-top: 1;
+    color: $text-muted;
+}
+.details, .abstract {
+    margin-top: 1;
+}
+.no-image {
+    content-align: center middle;
+    color: $text-muted;
+    height: 1fr;
+}
+#topic-list {
+    height: 20;
+    margin-top: 1;
+}
+#edit-abstract {
+    height: 8;
+}
+
+/* preview */
+#preview {
+    width: 94%;
+    height: 94%;
+    background: $surface;
+    border: round $primary;
+    padding: 1 2;
+}
+#preview-main {
+    height: 1fr;
+}
+#preview-image {
+    width: 40;
+    height: 1fr;
+    margin-right: 2;
+}
+#preview-info {
+    width: 1fr;
+}
+#preview-text {
+    height: 1fr;
+}
+#preview-footer {
+    height: 1;
+    margin-top: 0;
+}
+
+/* review queue */
+#review {
+    width: 94%;
+    height: 90%;
+    background: $surface;
+    border: round $primary;
+    padding: 1 2;
+}
+#review Horizontal {
+    height: 1fr;
+    margin-top: 1;
+}
+#review-list {
+    width: 45%;
+    height: 1fr;
+}
+#review-info {
+    width: 1fr;
+    padding: 0 0 0 2;
+}

@@ -19,6 +19,7 @@ from __future__ import annotations
 import datetime as dt
 import json
 import shutil
+import tempfile
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -26,6 +27,7 @@ from pathlib import Path
 from . import naming, record, sources
 from .classify import Classifier
 from .config import Config
+from .identifiers import ARXIV_NEW, ARXIV_OLD, clean_doi, find_dois
 from .identify import Identification, identify_text
 from .index import Index
 from .library import Library
@@ -310,6 +312,77 @@ class Ingester:
         record.write_new(folder / f"{ref.basename}.md", ref)
         return ref
 
+    # -- adding by hand or by agents ---------------------------------------------
+
+    def add(self, target: str, topic: str = "", source: str = "add", move: bool = False) -> Result:
+        """Add a PDF path, a DOI (doi:… or bare) or an arXiv id/URL to the library.
+
+        A PDF is copied (moved with move=True). An arXiv paper is downloaded. A DOI
+        alone makes a metadata-only reference, filed only when the topic is clear."""
+        kind, value = parse_target(target)
+        if kind == "pdf":
+            path = Path(value).expanduser()
+            if not path.is_file():
+                return Result(value, "error", "not a file")
+            return self._done(self.ingest(path, source=source, keep_source=not move, topic=topic))
+        if kind == "arxiv":
+            meta = sources.arxiv(self.http, value)
+            if meta is None:
+                return Result(f"arxiv:{value}", "error", "arXiv does not know this id")
+            if meta.doi:  # the published version has richer metadata
+                published = sources.crossref(self.http, meta.doi)
+                if published:
+                    published.arxiv = value
+                    meta = published
+            with tempfile.TemporaryDirectory(prefix="citadel-add-") as tmp:
+                pdf = Path(tmp) / f"{value.replace('/', '_')}.pdf"
+                self.http.download(f"https://arxiv.org/pdf/{value}", pdf)
+                result = self.ingest(pdf, source=source, known=meta, topic=topic)
+            result.file = f"arxiv:{value}"
+            return self._done(result)
+        return self._done(self._add_doi(value, topic, source))
+
+    def _add_doi(self, doi: str, topic: str, source: str) -> Result:
+        label = f"doi:{doi}"
+        meta = sources.crossref(self.http, doi)
+        if meta is None:
+            return Result(label, "error", "Crossref does not know this DOI")
+        existing = self.index.find_doi(meta.doi)
+        if existing:
+            return Result(label, "error", f"already in the library as {existing}")
+        sources.enrich(self.http, meta)
+        confidence = 1.0
+        if not topic:
+            found = self.classifier.classify(meta.title, meta.abstract, meta.journal)
+            topic, confidence = found.topic, found.confidence
+            if not topic or confidence < self.config.ingest.topic_threshold:
+                hint = f" (best guess: {topic}, {confidence:.2f})" if topic else ""
+                return Result(
+                    label,
+                    "error",
+                    f"topic unclear{hint}: choose a topic",
+                    title=meta.title,
+                    topic=topic,
+                    topic_confidence=confidence,
+                )
+        ref = self.file_metadata_only(meta, topic, source)
+        return Result(
+            label,
+            "filed",
+            "metadata only (no PDF)",
+            ref.citekey,
+            ref.folder,
+            ref.title,
+            1.0,
+            topic,
+            confidence,
+        )
+
+    def _done(self, result: Result) -> Result:
+        if result.status == "filed":
+            self.index.reindex()
+        return result
+
     # -- review --------------------------------------------------------------------
 
     def _review_or_report(
@@ -453,3 +526,16 @@ def _free_name(folder: Path, name: str) -> str:
 
 def _folder_names(folder: Path) -> set[str]:
     return {p.name for p in folder.iterdir() if p.is_dir()} if folder.is_dir() else set()
+
+
+def parse_target(target: str) -> tuple[str, str]:
+    """('pdf'|'doi'|'arxiv', value) for what `add` was given."""
+    lowered = target.lower()
+    if lowered.startswith("doi:") or (find_dois(target) and not Path(target).exists()):
+        return "doi", clean_doi(target[4:] if lowered.startswith("doi:") else target)
+    if lowered.startswith("arxiv:") or "arxiv.org/" in lowered:
+        for pattern in (ARXIV_NEW, ARXIV_OLD):
+            match = pattern.search(target if "arxiv" in lowered else f"arxiv:{target}")
+            if match:
+                return "arxiv", match.group(1)
+    return "pdf", target

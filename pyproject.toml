@@ -28,7 +28,7 @@ where = ["src"]
 version = {attr = "citadel.__version__"}
 
 [tool.setuptools.package-data]
-citadel = ["*.tcss", "*.toml"]
+citadel = ["*.tcss", "*.toml", "tui/*.tcss"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

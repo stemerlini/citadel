@@ -9,6 +9,7 @@ record already shows. Maths itself is never rewritten, only moved or tagged.
 from __future__ import annotations
 
 import re
+import unicodedata
 
 from .naming import main_title, words
 
@@ -35,6 +36,7 @@ IMAGE = re.compile(r"!\[([^\]]*)\]\(([^)\s]+)\)")
 
 def clean(markdown: str, title: str = "", figures_dir: str = "figures") -> str:
     text = markdown.replace("\r\n", "\n")
+    text = _join_accents(text)
     text = PAGE_ANCHOR.sub("", text)
     text = PAGE_LINK.sub(lambda m: m.group(1), text)
     text = _unescape_brackets(text)
@@ -46,6 +48,29 @@ def clean(markdown: str, title: str = "", figures_dir: str = "figures") -> str:
     text = re.sub(r"[ \t]+\n", "\n", text)
     text = re.sub(r"\n{3,}", "\n\n", text)
     return text.strip() + "\n"
+
+
+# Spacing accents that LaTeX-made PDFs often store before the letter they belong to:
+# "f¨ur" is "für". (The backtick is left alone: in Markdown it is code.)
+SPACING_ACCENTS = {
+    "¨": "\u0308",
+    "´": "\u0301",
+    "ˆ": "\u0302",
+    "˜": "\u0303",
+    "¸": "\u0327",
+    "˚": "\u030a",
+    "ˇ": "\u030c",
+    "˝": "\u030b",
+}
+LOOSE_ACCENT = re.compile(r"([¨´ˆ˜¸˚ˇ˝]) ?([A-Za-z])")
+
+
+def _join_accents(text: str) -> str:
+    def join(match: re.Match) -> str:
+        combined = unicodedata.normalize("NFC", match.group(2) + SPACING_ACCENTS[match.group(1)])
+        return combined if len(combined) == 1 else match.group(0)
+
+    return _outside_math(text, lambda s: LOOSE_ACCENT.sub(join, s))
 
 
 def _outside_math(text: str, change) -> str:

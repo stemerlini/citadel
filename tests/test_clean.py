@@ -58,3 +58,8 @@ def test_garbled_text_layers():
     assert text_layer_is_garbled(aps)
     assert text_layer_is_garbled("(cid:12) " * 10)
     assert not text_layer_is_garbled("A perfectly normal text layer with one ¼ cup.")
+
+
+def test_loose_accents_are_joined():
+    assert clean("f¨ur Universit¨at Erd˝os caf´e") == "für Universität Erdős café\n"
+    assert clean("$\\ddot{x}$ and a lone ¨ mark") == "$\\ddot{x}$ and a lone ¨ mark\n"
