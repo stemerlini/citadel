@@ -162,3 +162,13 @@ def test_stale_schema_is_rebuilt(tmp_path, library):
 def test_fts_query():
     assert fts_query("kelvin helm") == '"kelvin" "helm"*'
     assert fts_query("") == ""
+
+
+def test_unreachable_library_keeps_the_index(tmp_path, library):
+    index = Index(tmp_path / "index.db", library)
+    index.reindex()
+    library.rename(tmp_path / "unmounted")
+    report = index.reindex()
+    assert "not reachable" in report.problems[0] and report.removed == []
+    assert len(index.list()) == 3
+    index.close()

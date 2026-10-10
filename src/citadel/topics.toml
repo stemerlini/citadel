@@ -10,11 +10,11 @@
 
 ["plasma-physics"]
 description = "Plasma physics: broad reviews, textbooks and anything spanning several plasma fields."
-keywords = ["plasma", "plasma physics"]
+keywords = ["plasma", "plasma physics", "plasmas"]
 
 ["plasma-physics/fundamentals"]
 description = "Basic plasma theory: kinetic theory, transport coefficients, collisions, waves, formularies."
-keywords = ["kinetic theory", "transport coefficients", "Braginskii", "collisions", "Vlasov", "formulary", "Debye", "plasma waves"]
+keywords = ["kinetic theory", "transport coefficients", "Braginskii", "Coulomb collisions", "Vlasov", "formulary", "Debye length", "plasma waves", "dielectric tensor"]
 
 ["plasma-physics/mhd"]
 description = "Magnetohydrodynamics: equilibria, reconnection, MHD waves and stability theory."
@@ -22,11 +22,11 @@ keywords = ["magnetohydrodynamics", "MHD", "equilibrium", "magnetic reconnection
 
 ["plasma-physics/turbulence-transport"]
 description = "Plasma and MHD turbulence, energy spectra, intermittency, anomalous transport and Lévy walks."
-keywords = ["turbulence", "MHD turbulence", "energy spectrum", "cascade", "intermittency", "anomalous transport", "Levy walk", "Levy flight", "edge turbulence"]
+keywords = ["turbulence", "MHD turbulence", "compressible turbulence", "energy spectrum", "turbulent cascade", "intermittency", "anomalous transport", "Levy walk", "Levy flight", "edge turbulence", "dynamo"]
 
 ["plasma-physics/instabilities"]
 description = "Plasma instabilities: Kelvin-Helmholtz, Rayleigh-Taylor, magneto-Rayleigh-Taylor, kink and sausage modes."
-keywords = ["instability", "Kelvin-Helmholtz", "Rayleigh-Taylor", "MRT", "kink", "sausage", "growth rate"]
+keywords = ["instability", "instabilities", "Kelvin-Helmholtz", "Rayleigh-Taylor", "Richtmyer-Meshkov", "magneto-Rayleigh-Taylor", "kink", "sausage", "growth rate", "hydrodynamic instability"]
 
 ["plasma-physics/hedp"]
 description = "High energy density physics: matter at extreme pressure and temperature."
@@ -34,11 +34,11 @@ keywords = ["high energy density", "HEDP", "HED", "warm dense matter"]
 
 ["plasma-physics/hedp/pulsed-power"]
 description = "Pulsed-power driven plasmas: z-pinches, wire arrays, MAGPIE, Z machine."
-keywords = ["pulsed power", "z-pinch", "wire array", "MAGPIE", "Z machine", "current driver", "MagLIF"]
+keywords = ["pulsed power", "z-pinch", "wire array", "MAGPIE", "Z machine", "MagLIF", "COBRA", "rotating plasma", "plasma jet", "gas puff"]
 
 ["plasma-physics/hedp/laser-plasma"]
 description = "Laser-plasma interaction and laser-driven HED experiments."
-keywords = ["laser-plasma", "laser-driven", "OMEGA", "NIF", "high-power laser", "laser ablation"]
+keywords = ["laser-plasma", "laser-driven", "OMEGA", "high-power laser", "laser ablation", "X-ray free-electron laser", "XFEL", "femtosecond", "solid density", "warm dense matter", "relativistic laser"]
 
 ["plasma-physics/hedp/icf"]
 description = "Inertial confinement fusion: implosions, capsules, hohlraums, ignition."
@@ -46,15 +46,15 @@ keywords = ["inertial confinement fusion", "ICF", "implosion", "hohlraum", "caps
 
 ["plasma-physics/hedp/laboratory-astrophysics"]
 description = "Laboratory astrophysics: scaled experiments of jets, shocks, colliding flows and astrophysical plasmas."
-keywords = ["laboratory astrophysics", "astrophysical jets", "colliding flows", "shocks", "scaling", "Z-pinch astrophysics"]
+keywords = ["laboratory astrophysics", "astrophysical jets", "astrophysical", "colliding flows", "supernova", "accretion", "radiative shocks", "young stellar", "Ryutov scaling", "experimental astrophysics"]
 
 ["plasma-physics/diagnostics"]
 description = "Plasma diagnostics in general: reviews, courses and multi-technique papers."
-keywords = ["plasma diagnostics", "diagnostic", "measurement"]
+keywords = ["plasma diagnostics", "diagnostic technique", "diagnostic techniques"]
 
 ["plasma-physics/diagnostics/refractive"]
 description = "Refractive diagnostics: schlieren, shadowgraphy, interferometry, deflectometry, Faraday rotation."
-keywords = ["schlieren", "shadowgraphy", "interferometry", "deflectometry", "refraction", "Faraday rotation", "phase", "density gradient"]
+keywords = ["schlieren", "shadowgraphy", "shadowgraph", "interferometry", "interferometer", "deflectometry", "Faraday rotation", "refractive index gradient", "density gradient", "polarimetry"]
 
 ["plasma-physics/diagnostics/scattering"]
 description = "Scattering diagnostics: Thomson scattering, collective scattering, laser scattering."
@@ -62,11 +62,11 @@ keywords = ["Thomson scattering", "collective scattering", "laser scattering", "
 
 ["plasma-physics/diagnostics/spectroscopy"]
 description = "Plasma spectroscopy: emission, absorption, line broadening, X-ray spectroscopy."
-keywords = ["spectroscopy", "emission lines", "Stark broadening", "X-ray spectroscopy", "line ratio"]
+keywords = ["spectroscopy", "emission lines", "Stark broadening", "X-ray spectroscopy", "line ratio", "laser-induced fluorescence", "LIF", "velocity distribution function", "optical emission"]
 
 ["plasma-physics/diagnostics/imaging"]
 description = "Imaging diagnostics: fast cameras, X-ray imaging, tomography, digital image correlation."
-keywords = ["imaging", "high-speed camera", "X-ray imaging", "radiography", "tomography", "image correlation"]
+keywords = ["high-speed camera", "high-speed imaging", "X-ray imaging", "radiography", "tomography", "digital image correlation", "framing camera", "streak camera", "proton radiography"]
 
 ["plasma-physics/diagnostics/particle-probes"]
 description = "Probe and particle diagnostics: Langmuir and magnetic probes, neutron and particle detectors."
@@ -78,11 +78,11 @@ keywords = ["synthetic diagnostic", "forward model", "ray tracing", "simulated m
 
 ["plasma-physics/computational"]
 description = "Computational plasma physics: PIC, MHD and kinetic codes, numerical methods for plasmas."
-keywords = ["particle-in-cell", "PIC", "MHD code", "simulation", "numerical", "Gorgon", "kinetic code"]
+keywords = ["particle-in-cell", "PIC simulation", "MHD simulation", "MHD code", "kinetic simulation", "Gorgon", "hybrid code", "numerical scheme"]
 
 ["plasma-physics/fusion"]
 description = "Fusion energy: reviews, roadmaps and reactor-level studies."
-keywords = ["fusion energy", "fusion reactor", "roadmap", "power plant"]
+keywords = ["fusion energy", "nuclear fusion", "fusion reactor", "fusion power", "power plant", "controlled fusion"]
 
 ["plasma-physics/fusion/magnetic-confinement"]
 description = "Magnetic confinement fusion: tokamaks and stellarators."
@@ -100,7 +100,7 @@ keywords = ["plasma wakefield", "wakefield acceleration", "laser wakefield", "LW
 
 ["optics"]
 description = "Optics in general."
-keywords = ["optics", "optical"]
+keywords = ["optics"]
 
 ["optics/wave-optics"]
 description = "Wave optics: propagation through inhomogeneous media, diffraction, phase retrieval."
@@ -108,35 +108,35 @@ keywords = ["wave optics", "propagation", "inhomogeneous media", "diffraction", 
 
 ["optics/aero-optics"]
 description = "Aero-optics: optical distortion by turbulent flows."
-keywords = ["aero-optics", "optical distortion", "turbulent flow", "wavefront", "optical path difference"]
+keywords = ["aero-optics", "aero-optical", "optical distortion", "turbulent flow", "wavefront distortion", "optical path difference"]
 
 ["optics/imaging-systems"]
 description = "Optical imaging systems, cameras and lenses."
-keywords = ["imaging system", "lens", "camera", "optical design"]
+keywords = ["imaging system", "lens design", "optical design", "camera calibration"]
 
 # --- Fluid dynamics -----------------------------------------------------------
 
 ["fluid-dynamics"]
 description = "Fluid dynamics in general."
-keywords = ["fluid dynamics", "flow"]
+keywords = ["fluid dynamics", "fluid mechanics", "hydrodynamics"]
 
 ["fluid-dynamics/turbulence"]
 description = "Neutral-fluid turbulence: spectra, subgrid models, 2D and 3D turbulence."
-keywords = ["Navier-Stokes", "Kolmogorov", "subgrid", "2D turbulence", "energy spectrum", "fluid turbulence"]
+keywords = ["Navier-Stokes", "Kolmogorov", "subgrid", "2D turbulence", "fluid turbulence", "turbulent stress", "Reynolds stress", "boundary layer"]
 
 ["fluid-dynamics/hypersonics"]
 description = "Hypersonic flows and vehicles."
-keywords = ["hypersonic", "shock layer", "re-entry", "scramjet"]
+keywords = ["hypersonic", "shock layer", "re-entry", "reentry", "scramjet", "blackout", "plasma sheath", "stagnation streamline"]
 
 # --- Space engineering --------------------------------------------------------
 
 ["space-engineering"]
 description = "Space engineering in general."
-keywords = ["space", "spacecraft", "satellite"]
+keywords = ["spacecraft", "satellite", "space mission"]
 
 ["space-engineering/propulsion"]
 description = "Space propulsion: electric and plasma thrusters."
-keywords = ["propulsion", "thruster", "Hall thruster", "ion engine", "electric propulsion", "specific impulse"]
+keywords = ["propulsion", "thruster", "thrusters", "Hall thruster", "ion engine", "electric propulsion", "specific impulse", "plasmoid", "air-breathing"]
 
 ["space-engineering/space-weather"]
 description = "Space weather: solar wind, magnetosphere, geomagnetic storms."
@@ -158,8 +158,8 @@ keywords = ["data science", "data analysis"]
 
 ["data-science/machine-learning"]
 description = "Machine learning and AI methods."
-keywords = ["machine learning", "neural network", "deep learning", "AI"]
+keywords = ["machine learning", "neural network", "deep learning", "artificial intelligence"]
 
 ["data-science/statistics-methods"]
 description = "Statistics and fitting methods: power laws, inference, uncertainty."
-keywords = ["statistics", "power law", "fitting", "Bayesian", "inference", "uncertainty"]
+keywords = ["statistics", "power law", "power-law", "curve fitting", "Bayesian", "statistical inference", "uncertainty quantification", "complex systems"]

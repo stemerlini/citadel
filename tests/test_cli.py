@@ -110,3 +110,21 @@ def test_identify(capsys, monkeypatch, tmp_path, config_file):
     assert second["error"] == "not a file"
     code, out = run(capsys, "identify", "-v", str(paper))
     assert "confidence 0.97" in out and "· doi 10.1103/x" in out
+
+
+@pytest.mark.parametrize(
+    "target, expected",
+    [
+        ("doi:10.1063/1.2009008", ("doi", "10.1063/1.2009008")),
+        ("10.1063/1.2009008", ("doi", "10.1063/1.2009008")),
+        ("https://doi.org/10.1063/1.2009008", ("doi", "10.1063/1.2009008")),
+        ("arxiv:2101.12345", ("arxiv", "2101.12345")),
+        ("https://arxiv.org/abs/2101.12345v2", ("arxiv", "2101.12345")),
+        ("arxiv:nlin/0404043", ("arxiv", "nlin/0404043")),
+        ("~/Downloads/paper.pdf", ("pdf", "~/Downloads/paper.pdf")),
+    ],
+)
+def test_parse_target(target, expected):
+    from citadel.__main__ import parse_target
+
+    assert parse_target(target) == expected

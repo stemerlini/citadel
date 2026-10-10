@@ -17,7 +17,7 @@ from pathlib import Path
 from . import record
 from .record import RecordError, Reference
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS refs (
@@ -35,11 +35,13 @@ CREATE TABLE IF NOT EXISTS refs (
     arxiv        TEXT NOT NULL,
     has_pdf      INTEGER NOT NULL,
     has_fulltext INTEGER NOT NULL,
+    pdf_sha256   TEXT NOT NULL,     -- for spotting duplicates on ingest
     md_mtime     REAL NOT NULL,
     data         TEXT NOT NULL      -- the whole frontmatter, as JSON
 );
 CREATE INDEX IF NOT EXISTS refs_topic ON refs(topic);
 CREATE INDEX IF NOT EXISTS refs_doi ON refs(doi);
+CREATE INDEX IF NOT EXISTS refs_sha ON refs(pdf_sha256);
 CREATE TABLE IF NOT EXISTS tags (
     citekey TEXT NOT NULL REFERENCES refs(citekey) ON DELETE CASCADE,
     tag     TEXT NOT NULL,
@@ -118,6 +120,11 @@ class Index:
         """Bring the index in line with the files. Only changed files are re-read,
         unless full is set."""
         report = ReindexReport()
+        if not self.root.is_dir():
+            # The OneDrive mount is down, or the library moved: that is not the same
+            # as every reference having been deleted, so keep the index as it is.
+            report.problems.append(f"library folder {self.root} is not reachable")
+            return report
         known = {
             row["citekey"]: (row["folder"], row["md_mtime"])
             for row in self.conn.execute("SELECT citekey, folder, md_mtime FROM refs")
@@ -167,8 +174,8 @@ class Index:
         text = record.fulltext(body)
         self._delete(ref.citekey)
         self.conn.execute(
-            f"INSERT INTO refs ({LIST_COLUMNS}, md_mtime, data) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            f"INSERT INTO refs ({LIST_COLUMNS}, pdf_sha256, md_mtime, data) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (
                 ref.citekey,
                 folder,
@@ -184,6 +191,7 @@ class Index:
                 ref.arxiv,
                 int((directory / f"{directory.name}.pdf").exists()),
                 int(bool(text)),
+                ref.pdf_sha256,
                 mtime,
                 json.dumps(ref.to_dict(), ensure_ascii=False, default=str),
             ),
@@ -224,8 +232,18 @@ class Index:
         row = self.conn.execute("SELECT citekey FROM refs WHERE doi = ?", (doi.lower(),)).fetchone()
         return row["citekey"] if row else None
 
+    def find_sha256(self, sha256: str) -> str | None:
+        row = self.conn.execute(
+            "SELECT citekey FROM refs WHERE pdf_sha256 = ? AND pdf_sha256 != ''", (sha256,)
+        ).fetchone()
+        return row["citekey"] if row else None
+
     def citekeys(self) -> set[str]:
         return {row[0] for row in self.conn.execute("SELECT citekey FROM refs")}
+
+    def basenames(self) -> set[str]:
+        """Folder names in use (a basename is unique across the whole library)."""
+        return {row[0].rsplit("/", 1)[-1] for row in self.conn.execute("SELECT folder FROM refs")}
 
     def list(
         self,

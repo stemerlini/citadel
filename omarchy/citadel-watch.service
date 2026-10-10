@@ -1,0 +1,21 @@
+# Citadel inbox watcher: files whatever lands in the library's _inbox/.
+# Install:   cp omarchy/citadel-watch.service ~/.config/systemd/user/
+#            systemctl --user daemon-reload
+#            systemctl --user enable --now citadel-watch.service
+# Logs:      journalctl --user -u citadel-watch -f
+
+[Unit]
+Description=Citadel inbox watcher
+# The library lives on the Personal OneDrive rclone mount.
+Wants=omarchy-cloud-mount@Personal-OneDrive.service
+After=omarchy-cloud-mount@Personal-OneDrive.service network-online.target
+
+[Service]
+ExecStart=%h/Projects/citadel/.venv/bin/citadel watch
+Restart=on-failure
+RestartSec=60
+# Output goes to the journal line by line.
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=default.target

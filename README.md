@@ -17,6 +17,23 @@ The library defaults to `~/Cloud/Personal-OneDrive/Citadel`; change `library` in
 `data/config.toml` (or set `CITADEL_LIBRARY`). The topic tree lives in the
 library's `topics.toml`.
 
+## Daily use
+
+```sh
+citadel ingest              # file what is in <library>/_inbox (or send it to review)
+citadel review              # what is waiting, with Citadel's proposal
+citadel review accept NAME [--topic T] [--doi D]
+citadel add arxiv:2101.12345 | doi:10.… | paper.pdf
+citadel search "kelvin helmholtz" ; citadel get CITEKEY
+```
+
+To file the inbox automatically, install the watcher (a systemd user service):
+
+```sh
+cp omarchy/citadel-watch.service ~/.config/systemd/user/
+systemctl --user daemon-reload && systemctl --user enable --now citadel-watch.service
+```
+
 Every command takes `--json`.
 
 ## Development

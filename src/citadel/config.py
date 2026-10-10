@@ -23,7 +23,9 @@ class ObsidianConfig:
 
 @dataclass
 class IngestConfig:
-    review_threshold: float = 0.8  # below this confidence, items wait in _review/
+    review_threshold: float = 0.8  # metadata confidence needed to file without review
+    topic_threshold: float = 0.6  # topic confidence needed to file without review
+    settle_seconds: int = 60  # leave files this recently changed alone (still downloading)
     watch_interval: int = 30  # seconds between inbox polls (inotify misses rclone changes)
 
 
@@ -102,8 +104,12 @@ vault = ""
 notes_folder = "Literature"
 
 [ingest]
-# Below this confidence, a new item waits in _review/ instead of being filed.
+# Confidence needed to file a new item without asking: for its metadata, and for
+# its topic folder. Below either, it waits in _review/ with a proposal.
 review_threshold = 0.8
+topic_threshold = 0.6
+# Files changed less than this many seconds ago are left alone (still downloading).
+settle_seconds = 60
 # Seconds between inbox checks.
 watch_interval = 30
 

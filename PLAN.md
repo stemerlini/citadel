@@ -3,9 +3,9 @@
 > The maesters' library for an Omarchy scientist: drop a paper in, get it renamed,
 > catalogued, cited, converted to Markdown, and readable by you, Obsidian and agents.
 
-Status: Phase 2 done (2026-10-08): metadata identification (`citadel identify`), 120 tests.
-On a 20-PDF sample of the old library: 16 auto-filed, all correct; 4 to review; 0 confidently wrong.
-Library at `~/Cloud/Personal-OneDrive/Citadel`.
+Status: Phase 3 done (2026-10-10): ingest, review queue, `add`, inbox watcher; 148 tests.
+On the 20-PDF sample: 9 filed automatically (all correct), 11 to review — every real paper
+in review already proposes the right topic. Library at `~/Cloud/Personal-OneDrive/Citadel`.
 
 ## Goals
 
@@ -204,18 +204,38 @@ papers they find.
 
 ### Classifier (local, free)
 
-The interface is small (`decide(record, question) → answer + confidence`), so the
-backend can be swapped later, but the only one planned is local:
+The interface is small (`classify(title, abstract, journal, text) → topic + confidence`),
+so the backend can be swapped. Paid decision services (TypeSafe Jev, the Claude API) are
+left out on purpose.
 
-1. **Rules:** document type from Crossref/arXiv type, page count, ISBN, and keywords
-   ("slides", "ECSS-", "thesis").
-2. **Embedding similarity:** a small local sentence-embedding model (CPU/GPU) compares
-   the title + abstract with each topic's description/keywords and with the centroid
-   of the papers already filed there. The more you file, the better it gets.
-3. **Metadata match check:** fuzzy comparison of the found title/authors with the PDF's
-   first-page text.
+1. **Keywords (done, Phase 3):** keywords from `topics.toml`, matched as lightly stemmed
+   phrases, weighted by field (title 3, abstract 2, journal 1.5, page text 0.5).
+   Discipline-level keywords count half (generic). Topics are scored along their strongest
+   path down the tree; the classifier descends only while one subtopic beats the next by
+   1.5x, so an unclear paper stays at the parent. Confidence = narrowest margin × evidence.
+2. **Learned from the library (planned, after migration):** the old library's 714 hand-sorted
+   papers are labelled examples. A nearest-neighbour vote over filed references (TF-IDF
+   first, a small local embedding model later) adds "papers like this live in X" evidence,
+   which keywords cannot give. Expected to raise most review items over the threshold.
+3. **Document type:** from the metadata source (Crossref/arXiv/OpenLibrary); 150+ pages
+   with no source means a book.
 
-Paid decision services (TypeSafe Jev, the Claude API) are left out on purpose.
+### Ingest rules (Phase 3)
+
+- File automatically only when metadata ≥ `review_threshold` (0.8) **and** topic ≥
+  `topic_threshold` (0.6). Otherwise → `_review/<file>` plus `<file>.citadel.json` holding
+  the proposal, confidences and evidence.
+- Exact duplicates (SHA-256) and same-DOI files go to review, never silently dropped.
+- Copies are verified by hash before the source is removed; a failure leaves the source in
+  place and removes only the half-made folder. Files changed in the last `settle_seconds`
+  (60), hidden files and browser partial downloads are left alone.
+- Abstracts missing from Crossref are fetched from OpenAlex (helps search and topics).
+- `citadel review accept <item> [--topic T] [--doi D] [--type X]`, `citadel review reject
+  <item>` (exact duplicate → deleted; anything else → `_attachments/`).
+- `citadel add <pdf | doi:… | arxiv:…> [--topic T] [--agent NAME]`: arXiv downloads the PDF;
+  a DOI alone makes a metadata-only reference (needs a clear topic or `--topic`).
+- `citadel watch` + `omarchy/citadel-watch.service` (systemd user unit, after the OneDrive
+  mount). If the mount is down, nothing is touched and the index is kept.
 
 ## TUI (Textual)
 

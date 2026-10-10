@@ -123,6 +123,19 @@ class Http:
         file.write_text(json.dumps({"url": url, "body": body}))
         return body
 
+    def download(self, url: str, target: Path) -> None:
+        """Save a file (not cached: PDFs are kept by the library itself)."""
+        self._wait(urlparse(url).hostname or "")
+        try:
+            with self.client.stream("GET", url) as response:
+                if response.status_code != 200:
+                    raise SourceError(f"{urlparse(url).hostname}: HTTP {response.status_code}")
+                with target.open("wb") as handle:
+                    for chunk in response.iter_bytes():
+                        handle.write(chunk)
+        except httpx.HTTPError as error:
+            raise SourceError(f"{urlparse(url).hostname}: {error}") from error
+
     def _wait(self, host: str) -> None:
         with self._lock:
             interval = MIN_INTERVAL.get(host, DEFAULT_INTERVAL)
@@ -173,7 +186,8 @@ def crossref_work(work: dict) -> Metadata:
         journal=clean_text(container[0]) if container else "",
         volume=str(work.get("volume", "")),
         issue=str(work.get("issue", "")),
-        pages=str(work.get("page", "")).replace("--", "-"),
+        # APS/AIP and others number articles instead of paging them (PRL 116, 105004).
+        pages=str(work.get("page") or work.get("article-number") or "").replace("--", "-"),
         publisher=work.get("publisher", ""),
         doi=str(work.get("DOI", "")).lower(),
         isbn=isbns[0].replace("-", "") if isbns else "",
@@ -255,6 +269,32 @@ def arxiv(http: Http, arxiv_id: str) -> Metadata | None:
 
 
 # -- OpenAlex --------------------------------------------------------------------
+
+
+def openalex_doi(http: Http, doi: str) -> Metadata | None:
+    url = f"https://api.openalex.org/works/doi:{quote(doi, safe='/')}"
+    if http.contact_email:
+        url += f"?mailto={quote(http.contact_email)}"
+    body = http.get(url)
+    if body is None:
+        return None
+    try:
+        return openalex_work(json.loads(body))
+    except ValueError as error:
+        raise SourceError("openalex: unexpected response") from error
+
+
+def enrich(http: Http, meta: Metadata) -> Metadata:
+    """Fill a missing abstract from OpenAlex (Crossref has none for many publishers).
+    Best effort: a source being down never blocks filing."""
+    if meta.doi and not meta.abstract:
+        try:
+            other = openalex_doi(http, meta.doi)
+        except SourceError:
+            other = None
+        if other and other.abstract:
+            meta.abstract = other.abstract
+    return meta
 
 
 def openalex_search(http: Http, title: str, limit: int = 5) -> list[Metadata]:
