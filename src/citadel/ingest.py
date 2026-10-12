@@ -24,7 +24,7 @@ import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-from . import naming, record, sources
+from . import naming, paths, record, sources
 from .classify import Classifier
 from .config import Config
 from .identifiers import ARXIV_NEW, ARXIV_OLD, clean_doi, find_dois
@@ -300,6 +300,7 @@ class Ingester:
         except BaseException:
             shutil.rmtree(folder, ignore_errors=True)  # only what was just created
             raise
+        self.index.add(folder / f"{ref.basename}.md")
         if not keep_source:
             path.unlink()
         return ref
@@ -310,6 +311,7 @@ class Ingester:
         folder = self.library.root / ref.folder
         folder.mkdir(parents=True)
         record.write_new(folder / f"{ref.basename}.md", ref)
+        self.index.add(folder / f"{ref.basename}.md")
         return ref
 
     # -- adding by hand or by agents ---------------------------------------------
@@ -478,6 +480,37 @@ class Ingester:
             topic,
             1.0,
         )
+
+    def retry(self, name: str = "") -> list[Result]:
+        """Run review items through identification and classification again (after
+        better rules, new topics or keywords). Each file is first copied to local
+        scratch space and taken out of review; if anything fails it is put back."""
+        items = [self.find_review(name)] if name else self.review_items()
+        results = []
+        scratch = paths.CACHE_DIR / "retry"
+        scratch.mkdir(parents=True, exist_ok=True)
+        filed = False
+        for proposal in items:
+            if proposal.duplicate_of or not proposal.file.lower().endswith(".pdf"):
+                continue  # nothing new to learn about these
+            path = self.library.review / proposal.file
+            sidecar = self.library.review / f"{proposal.file}{PROPOSAL_SUFFIX}"
+            working = scratch / proposal.file
+            working.unlink(missing_ok=True)
+            _verified_copy(path, working, proposal.sha256)
+            path.unlink()
+            sidecar.unlink(missing_ok=True)
+            result = self.ingest(working, source=proposal.source)
+            if result.status == "error":  # put it back as it was
+                _verified_copy(working, path, proposal.sha256)
+                proposal.save(self.library.review)
+                working.unlink()
+            result.file = proposal.file
+            filed = filed or result.status == "filed"
+            results.append(result)
+        if filed:
+            self.index.reindex()
+        return results
 
     def reject(self, name: str) -> Result:
         """Not a reference to keep: an exact duplicate is deleted, anything else goes to

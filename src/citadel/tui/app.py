@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 import shutil
 import subprocess
+import threading
 import time
 from collections import Counter
 from pathlib import Path
@@ -127,6 +128,7 @@ class Citadel(App):
         self.rows: list[dict] = []
         self.snippets: dict[str, str] = {}
         self.busy = ""  # what a background task is doing, for the top bar
+        self.ingest_lock = threading.Lock()
 
     # -- layout ------------------------------------------------------------------------
 
@@ -533,7 +535,7 @@ class Citadel(App):
                 "PDFs are copied, arXiv papers downloaded; a DOI alone makes a "
                 "reference without a PDF.",
             ),
-            lambda target: target and self.run_ingester("add", target),
+            lambda target: target and self.run_ingester("add", [target]),
         )
 
     def action_review(self) -> None:
@@ -541,7 +543,7 @@ class Citadel(App):
             ReviewScreen(
                 self.review_items(),
                 self.topic_paths(),
-                lambda action, name, **kw: self.run_ingester(action, name, **kw),
+                lambda action, names, **kw: self.run_ingester(action, names, **kw),
             )
         )
 
@@ -551,40 +553,61 @@ class Citadel(App):
         return Ingester(self.library, self.index, None, self.config).review_items()
 
     @work(thread=True, group="ingest")
-    def run_ingester(self, action: str, target: str, **kwargs) -> None:
-        """add / accept / reject in a worker thread with its own connections."""
+    def run_ingester(self, action: str, targets: list[str], **kwargs) -> None:
+        """add / accept / reject / retry, one target after the other, in a worker thread
+        with its own connections. The lock keeps two batches from racing on files."""
         from ..ingest import Ingester
         from ..sources import Http, SourceError
 
-        index = Index(paths.INDEX_FILE, self.library.root)
-        http = Http(self.config.metadata.contact_email)
-        self.busy = {"add": "adding", "accept": "filing", "reject": "rejecting"}[
-            action
-        ] + f" {target}"
-        try:
-            ingester = Ingester(self.library, index, http, self.config)
-            if action == "add":
-                result = ingester.add(target, **kwargs)
-            elif action == "accept":
-                result = ingester.accept(target, **kwargs)
-            else:
-                result = ingester.reject(target)
-            items = ingester.review_items()
-        except (LookupError, ValueError, OSError, SourceError) as error:
-            self.call_from_thread(self.notify, f"{target}: {error}", severity="error")
-            return
-        finally:
-            self.busy = ""
-            http.close()
-            index.close()
-        ok = result.status in ("filed", "review", "kept", "deleted")
-        where = result.folder or result.reason
+        with self.ingest_lock:
+            index = Index(paths.INDEX_FILE, self.library.root)
+            http = Http(self.config.metadata.contact_email)
+            verb = {
+                "add": "adding",
+                "accept": "filing",
+                "reject": "rejecting",
+                "retry": "retrying",
+            }[action]
+            filed: list[str] = []
+            failures = 0
+            try:
+                ingester = Ingester(self.library, index, http, self.config)
+                for number, target in enumerate(targets, 1):
+                    self.busy = f"{verb} {number}/{len(targets)}: {target or 'all'}"
+                    try:
+                        if action == "add":
+                            results = [ingester.add(target, **kwargs)]
+                        elif action == "accept":
+                            results = [ingester.accept(target, **kwargs)]
+                        elif action == "retry":
+                            results = ingester.retry(target)
+                        else:
+                            results = [ingester.reject(target)]
+                    except (LookupError, ValueError, OSError, SourceError) as error:
+                        failures += 1
+                        self.call_from_thread(self.notify, f"{target}: {error}", severity="error")
+                        continue
+                    for result in results:
+                        if result.status == "filed":
+                            filed.append(result.citekey)
+                        elif result.status == "error":
+                            failures += 1
+                items = ingester.review_items()
+            finally:
+                self.busy = ""
+                http.close()
+                index.close()
+        summary = f"{verb.capitalize()} done: {len(filed)} filed"
+        if action == "retry":
+            summary += f", {len(items)} still in review"
+        if failures:
+            summary += f", {failures} failed"
         self.call_from_thread(
-            self.notify, f"{result.status}: {where}", severity="information" if ok else "error"
+            self.notify, summary, severity="warning" if failures else "information"
         )
-        self.call_from_thread(self.after_ingest, items, result.citekey)
-        if result.status == "filed" and self.config.convert.auto and action != "reject":
-            self.call_from_thread(self.convert, [result.citekey])
+        self.call_from_thread(self.after_ingest, items, filed[-1] if filed else "")
+        if filed and self.config.convert.auto:
+            self.call_from_thread(self.convert, filed)
 
     def after_ingest(self, items, citekey: str) -> None:
         self.reload(keep=citekey or None)

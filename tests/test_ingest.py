@@ -207,3 +207,66 @@ def test_unknown_topic_is_refused(setup):
     ingester, _, _, _ = setup
     with pytest.raises(ValueError, match="unknown topic"):
         ingester.new_reference(GOOD, "not/a/topic", 1.0, "add")
+
+
+def test_retry_files_items_that_now_pass(setup):
+    ingester, library, index, state = setup
+    state["confidence"] = 0.5
+    drop(library)
+    ingester.process_inbox()
+    assert len(ingester.review_items()) == 1
+
+    state["confidence"] = 1.0  # e.g. a better identifier
+    [result] = ingester.retry()
+    assert result.status == "filed" and result.file == "paper.pdf"
+    assert ingester.review_items() == []
+    assert not any(library.review.iterdir())
+    assert index.get("settles2017review")["data"]["source"] == "inbox"
+
+
+def test_retry_that_still_fails_stays_in_review(setup):
+    ingester, library, _, state = setup
+    state["confidence"] = 0.5
+    drop(library)
+    ingester.process_inbox()
+    [result] = ingester.retry()
+    assert result.status == "review"
+    [item] = ingester.review_items()
+    assert item.file == "paper.pdf"  # same name, not "paper (2).pdf"
+
+
+def test_retry_puts_the_file_back_on_error(setup, monkeypatch):
+    ingester, library, _, state = setup
+    state["confidence"] = 0.5
+    drop(library)
+    ingester.process_inbox()
+    before = (library.review / "paper.pdf").read_bytes()
+
+    def broken(path, **kwargs):
+        from citadel.ingest import Result
+
+        return Result(str(path), "error", "boom")
+
+    monkeypatch.setattr(ingester, "ingest", broken)
+    [result] = ingester.retry()
+    assert result.status == "error"
+    assert (library.review / "paper.pdf").read_bytes() == before
+    assert len(ingester.review_items()) == 1
+
+
+def test_identical_files_in_one_batch_are_caught(setup):
+    ingester, library, _, _ = setup
+    drop(library, "a.pdf")
+    drop(library, "a copy.pdf")  # same bytes
+    first, second = ingester.process_inbox()
+    assert first.status == "filed"
+    assert second.status == "review" and second.reason == "identical to settles2017review"
+
+
+def test_same_doi_in_one_batch_is_caught(setup):
+    ingester, library, _, _ = setup
+    drop(library, "a.pdf", b"%PDF published")
+    drop(library, "b.pdf", b"%PDF preprint")  # other bytes, same metadata/DOI
+    first, second = ingester.process_inbox()
+    assert first.status == "filed"
+    assert second.status == "review" and "same DOI" in second.reason

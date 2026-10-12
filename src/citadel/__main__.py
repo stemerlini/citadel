@@ -12,7 +12,7 @@
     citadel ingest          file everything waiting in the inbox (or send it to review)
     citadel watch           keep ingesting the inbox (for the systemd user service)
     citadel add X           add a PDF, doi:…, or arxiv:… to the library
-    citadel review          list items waiting for review; accept or reject them
+    citadel review          list items waiting for review; accept, reject or retry them
     citadel convert         convert filed PDFs to Markdown on the GPU (Marker)
     citadel cite KEY…       formatted references, BibTeX entries or citekeys
     citadel --version
@@ -42,6 +42,12 @@ def emit(data: dict, as_json: bool, text: str) -> None:
     print(json.dumps(data, indent=2) if as_json else text)
 
 
+def topics_module_default() -> str:
+    from .topics import DEFAULT_FILE
+
+    return str(DEFAULT_FILE)
+
+
 def cmd_init(args: argparse.Namespace) -> int:
     from . import config as config_module
     from . import paths
@@ -59,6 +65,8 @@ def cmd_init(args: argparse.Namespace) -> int:
         "config_created": config_created,
         "library": str(library.root),
         "topics_file_created": report.topics_file_created,
+        "topics_file_updated": report.topics_file_updated,
+        "topics_file_customised": report.topics_file_customised,
         "created": report.created,
     }
     lines = [
@@ -67,8 +75,20 @@ def cmd_init(args: argparse.Namespace) -> int:
     ]
     if report.topics_file_created:
         lines.append(f"  created {library.topics_file.name}")
+    if report.topics_file_updated:
+        lines.append(f"  updated {library.topics_file.name} to Citadel's new default")
+    if report.topics_file_customised:
+        lines.append(
+            f"  {library.topics_file.name} has your own edits: left as it is "
+            f"(compare with {topics_module_default()})"
+        )
     lines += [f"  created {name}/" for name in report.created]
-    if not report.created and not report.topics_file_created:
+    if not (
+        report.created
+        or report.topics_file_created
+        or report.topics_file_updated
+        or report.topics_file_customised
+    ):
         lines.append("  nothing to do: the library is already set up")
     emit(data, args.json, "\n".join(lines))
     return 0
@@ -335,6 +355,7 @@ def converted_line(result) -> str:
 def cmd_watch(args: argparse.Namespace) -> int:
     import time
 
+    from .classify import Classifier
     from .convert import Converter, ConvertError
 
     session = Session()
@@ -347,6 +368,8 @@ def cmd_watch(args: argparse.Namespace) -> int:
     try:
         while True:
             filed = []
+            # Topics and keywords may have changed since the last pass (citadel init).
+            session.ingester.classifier = Classifier(session.library.topics())
             for result in session.ingester.process_inbox():
                 log(result_line(result))
                 if result.status == "filed":
@@ -458,6 +481,11 @@ def cmd_review(args: argparse.Namespace) -> int:
                     lines.append(f"    topic:    {item.topic} [{item.topic_confidence:.2f}]")
             emit(data, args.json, "\n".join(lines) or "Nothing to review.")
             return 0
+        if args.action == "retry":
+            results = ingester.retry(args.item or "")
+            text = "\n".join(map(result_line, results)) or "Nothing to retry."
+            emit({"results": [r.as_dict() for r in results]}, args.json, text)
+            return 0
         if not args.item:
             emit({"error": "which item?"}, args.json, "Name the item (file name or prefix).")
             return 1
@@ -542,7 +570,9 @@ def main(argv: list[str] | None = None) -> None:
     add.set_defaults(func=cmd_add)
 
     review = sub.add_parser("review", parents=[common], help="settle items waiting in _review/")
-    review.add_argument("action", nargs="?", default="list", choices=["list", "accept", "reject"])
+    review.add_argument(
+        "action", nargs="?", default="list", choices=["list", "accept", "reject", "retry"]
+    )
     review.add_argument("item", nargs="?", help="file name (or a unique prefix)")
     review.add_argument("--topic", default="", help="accept: topic folder")
     review.add_argument("--doi", default="", help="accept: take the metadata from this DOI")

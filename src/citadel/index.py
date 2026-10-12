@@ -169,6 +169,16 @@ class Index:
                 report.removed.append(key)
         return report
 
+    def add(self, md_path: Path) -> str:
+        """Index one record right away (just filed), so the next file in the same batch
+        sees it: duplicates are caught and its names are taken."""
+        ref, body = record.read(md_path)
+        folder = md_path.parent.relative_to(self.root).as_posix()
+        topic = md_path.parent.parent.relative_to(self.root).as_posix()
+        with self.conn:
+            self._store(ref, body, folder, "" if topic == "." else topic, md_path.stat().st_mtime)
+        return ref.citekey
+
     def _store(self, ref: Reference, body: str, folder: str, topic: str, mtime: float) -> None:
         directory = self.root / folder
         text = record.fulltext(body)

@@ -132,23 +132,45 @@ keywords = ["hypersonic", "shock layer", "re-entry", "reentry", "scramjet", "bla
 
 ["space-engineering"]
 description = "Space engineering in general."
-keywords = ["spacecraft", "satellite", "space mission"]
+keywords = ["spacecraft", "satellite", "space mission", "CubeSat", "space systems"]
 
 ["space-engineering/propulsion"]
 description = "Space propulsion: electric and plasma thrusters."
 keywords = ["propulsion", "thruster", "thrusters", "Hall thruster", "ion engine", "electric propulsion", "specific impulse", "plasmoid", "air-breathing"]
 
 ["space-engineering/space-weather"]
-description = "Space weather: solar wind, magnetosphere, geomagnetic storms."
-keywords = ["space weather", "solar wind", "magnetosphere", "geomagnetic storm", "CME"]
+description = "Space weather: solar activity, geomagnetic storms and their effects, forecasting."
+keywords = ["space weather", "solar wind", "magnetosphere", "geomagnetic storm", "geomagnetic storms", "CME", "coronal mass ejection", "solar flare", "forecasting", "ionosphere"]
+
+["space-engineering/radiation-environment"]
+description = "The space radiation environment and its models: trapped belts, solar particles, cosmic rays, shielding analysis."
+keywords = ["space environment", "radiation environment", "radiation belts", "trapped radiation", "trapped particles", "Van Allen", "solar energetic particles", "SEP", "galactic cosmic rays", "cosmic rays", "CREME", "CREME96", "AE8", "AP8", "AE9", "AP9", "shielding analysis", "sectoring analysis", "dose-depth", "radiation shielding", "SPENVIS", "GEANT4"]
 
 ["space-engineering/power"]
 description = "Space power: radioisotope power systems and laser power transmission."
-keywords = ["radioisotope", "RTG", "power beaming", "laser power transmission", "photovoltaic"]
+keywords = ["radioisotope", "RTG", "power beaming", "laser power transmission", "photovoltaic", "solar array"]
 
 ["space-engineering/radiation-effects"]
-description = "Radiation effects and testing of components; ECSS standards."
-keywords = ["radiation testing", "total ionising dose", "single event effects", "ECSS", "displacement damage"]
+description = "Radiation effects on electronics and materials, radiation testing and hardness assurance."
+keywords = ["radiation effects", "radiation testing", "radiation hardness", "radiation hardness assurance", "radiation-hardened", "rad-hard", "total ionising dose", "total ionizing dose", "TID", "single event effects", "single-event effects", "single event upset", "SEE", "SEU", "SEL", "latch-up", "displacement damage", "NIEL", "heavy ion", "proton testing", "laser testing", "internal charging", "spacecraft charging", "dielectric charging", "dose rate", "ELDRS", "radiation-induced", "irradiation"]
+
+["space-engineering/instruments"]
+description = "Space-borne instruments, mainly radiation and particle monitors and spectrometers: design and calibration."
+keywords = ["radiation monitor", "particle detector", "energetic particle detector", "particle spectrometer", "X-ray spectrometer", "space instrument", "in-flight calibration", "instrument calibration", "RADEM", "RADMON", "SREM", "payload", "onboard"]
+
+["space-engineering/product-assurance"]
+description = "Product assurance: reliability, dependability, safety, EEE components and quality standards."
+keywords = ["product assurance", "reliability", "reliability prediction", "dependability", "safety", "failure rate", "FMECA", "EEE components", "EEE parts", "derating", "qualification", "quality assurance", "MIL-HDBK", "ECSS-Q"]
+
+# --- Nuclear -------------------------------------------------------------------
+
+["nuclear"]
+description = "Nuclear science and technology in general."
+keywords = ["nuclear", "nuclear physics", "radioactivity"]
+
+["nuclear/radiation-detection"]
+description = "Radiation detection and measurement: detectors, dosimetry, spectroscopy of ionising radiation."
+keywords = ["radiation detection", "radiation measurement", "radiation detector", "semiconductor detector", "particle tracking", "scintillator", "dosimetry", "dosimeter", "gamma spectroscopy", "ionization chamber", "proportional counter", "silicon detector", "Knoll"]
 
 # --- Data science -------------------------------------------------------------
 

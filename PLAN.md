@@ -380,6 +380,17 @@ How `citadel identify` decides, and why (each rule came from a real failure on t
   (two editions, conference vs journal version), confidence is capped at 0.75 → review.
 - Every attempt is logged in `evidence`, which the review queue and agents can show.
 
+- **First real batch (2026-10-12, radiation-testing material):** 32 of 34 files went to
+  review. Causes: (1) the library's `topics.toml` was the Phase 0 copy, since `init` never
+  replaced it, so the tuned keywords had never applied (now `init` updates an *unedited*
+  copy, tracked by `.topics.default.sha256`, and leaves an edited one alone); (2) no topics
+  for radiation environment, instruments, product assurance, radiation detection (added
+  with the user's approval); (3) standards and handbooks have no DOI (now recognised by
+  their identifier, `standards.py`); (4) a batch bug: the index was updated only after a
+  whole batch, so identical files in one batch were both filed under the same citekey (now
+  each filing is indexed at once). `citadel review retry` (and `R` in the review screen)
+  re-runs review items with the current rules; `v` marks several items for one action.
+
 ## Phases
 
 | # | Deliverable | Done when |

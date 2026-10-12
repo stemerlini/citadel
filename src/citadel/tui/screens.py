@@ -378,7 +378,8 @@ class ConfirmScreen(ModalScreen[bool]):
 
 
 class ReviewScreen(ModalScreen[None]):
-    """Items waiting in _review/ with Citadel's proposal; settle them one by one."""
+    """Items waiting in _review/ with Citadel's proposal. Settle them one by one, or
+    mark several (v) and accept, re-topic or reject them together."""
 
     BINDINGS = [
         Binding("escape,q,i", "dismiss", "Close"),
@@ -386,6 +387,9 @@ class ReviewScreen(ModalScreen[None]):
         Binding("t", "accept_topic", "Other topic"),
         Binding("d", "accept_doi", "Use DOI"),
         Binding("x", "reject", "Reject"),
+        Binding("v", "mark", "Mark"),
+        Binding("V", "mark_all", "Mark all", show=False),
+        Binding("R", "retry", "Retry all"),
         Binding("space", "preview", "Preview"),
     ]
 
@@ -393,7 +397,8 @@ class ReviewScreen(ModalScreen[None]):
         super().__init__()
         self.items = items  # list[ingest.Proposal]
         self.topics = topics
-        self.settle = settle  # callable(action, name, **kwargs) run by the app
+        self.settle = settle  # callable(action, [names], **kwargs) run by the app
+        self.marked: set[str] = set()
 
     def compose(self) -> ComposeResult:
         with Vertical(id="review"):
@@ -404,8 +409,9 @@ class ReviewScreen(ModalScreen[None]):
                     yield Static(id="review-details")
             yield Static(
                 "[dim][b]a[/] accept · [b]t[/] accept with another topic · "
-                "[b]d[/] accept with a DOI · [b]x[/] reject · [b]Space[/] preview · "
-                "[b]Esc[/] close[/]",
+                "[b]d[/] accept with a DOI · [b]x[/] reject · [b]v[/] mark (V all) · "
+                "[b]R[/] retry all · [b]Space[/] preview · [b]Esc[/] close\n"
+                "With items marked, a / t / x act on all of them.[/]",
                 classes="footnote",
             )
 
@@ -415,14 +421,18 @@ class ReviewScreen(ModalScreen[None]):
 
     def refresh_items(self, items) -> None:
         self.items = items
+        names = {item.file for item in items}
+        self.marked &= names
+        marked = f" · [b]{len(self.marked)} marked[/]" if self.marked else ""
         self.query_one("#review-title", Static).update(
-            f"Review · {len(items)} waiting" if items else "Review · nothing waiting"
+            (f"Review · {len(items)} waiting" if items else "Review · nothing waiting") + marked
         )
         options = self.query_one("#review-list", OptionList)
         index = options.highlighted or 0
         options.clear_options()
         for item in items:
-            options.add_option(Option(escape(item.file), id=item.file))
+            mark = "[b $accent]●[/] " if item.file in self.marked else "  "
+            options.add_option(Option(mark + escape(item.file), id=item.file))
         if items:
             options.highlighted = min(index, len(items) - 1)
         self.show_details()
@@ -433,6 +443,31 @@ class ReviewScreen(ModalScreen[None]):
         if options.highlighted is None or not self.items:
             return None
         return self.items[options.highlighted]
+
+    def targets(self) -> list:
+        """The marked items, or the highlighted one."""
+        if self.marked:
+            return [item for item in self.items if item.file in self.marked]
+        return [self.current] if self.current else []
+
+    def action_mark(self) -> None:
+        item = self.current
+        if item:
+            self.marked ^= {item.file}
+            options = self.query_one("#review-list", OptionList)
+            index = options.highlighted
+            self.refresh_items(self.items)
+            if index is not None and index + 1 < len(self.items):
+                options.highlighted = index + 1
+
+    def action_mark_all(self) -> None:
+        everything = {item.file for item in self.items}
+        self.marked = set() if self.marked == everything else everything
+        self.refresh_items(self.items)
+
+    def action_retry(self) -> None:
+        self.marked.clear()
+        self.settle("retry", [""])
 
     @on(OptionList.OptionHighlighted, "#review-list")
     def show_details(self) -> None:
@@ -461,33 +496,54 @@ class ReviewScreen(ModalScreen[None]):
         panel.update("\n".join(line for line in lines if line is not None))
 
     def action_accept(self) -> None:
-        if self.current:
-            self.settle("accept", self.current.file)
+        targets = self.targets()
+        if targets:
+            self.settle("accept", [item.file for item in targets])
+            self.marked.clear()
 
     def action_accept_topic(self) -> None:
-        item = self.current
-        if item:
-            self.app.push_screen(
-                TopicPicker(self.topics, item.topic, f"Topic for {item.file}"),
-                lambda topic: topic and self.settle("accept", item.file, topic=topic),
-            )
+        targets = self.targets()
+        if not targets:
+            return
+        what = targets[0].file if len(targets) == 1 else f"{len(targets)} items"
+
+        def chosen(topic: str | None) -> None:
+            if topic:
+                self.settle("accept", [item.file for item in targets], topic=topic)
+                self.marked.clear()
+
+        self.app.push_screen(
+            TopicPicker(self.topics, targets[0].topic, f"Topic for {what}"), chosen
+        )
 
     def action_accept_doi(self) -> None:
         item = self.current
         if item:
             self.app.push_screen(
                 Prompt("Accept with a DOI", "10.…", "Citadel takes the metadata from Crossref."),
-                lambda doi: doi and self.settle("accept", item.file, doi=doi),
+                lambda doi: doi and self.settle("accept", [item.file], doi=doi),
             )
 
     def action_reject(self) -> None:
-        item = self.current
-        if item:
+        targets = self.targets()
+        if not targets:
+            return
+        if len(targets) == 1:
+            item = targets[0]
             what = "deleted (exact duplicate)" if item.duplicate_of else "kept in _attachments/"
-            self.app.push_screen(
-                ConfirmScreen(f"Reject {item.file}? It will be {what}."),
-                lambda yes: yes and self.settle("reject", item.file),
+            question = f"Reject {item.file}? It will be {what}."
+        else:
+            question = (
+                f"Reject {len(targets)} items? Exact duplicates are deleted, the "
+                "rest kept in _attachments/."
             )
+
+        def confirmed(yes: bool) -> None:
+            if yes:
+                self.settle("reject", [item.file for item in targets])
+                self.marked.clear()
+
+        self.app.push_screen(ConfirmScreen(question), confirmed)
 
     def action_preview(self) -> None:
         item = self.current

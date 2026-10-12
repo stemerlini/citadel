@@ -136,3 +136,39 @@ def test_table_layout_drops_columns_when_narrow():
     assert set(wide) == {"status", "year", "title", "author", "type", "topic", "files"}
     narrow = table_layout(70, show_topic=True)
     assert "topic" not in narrow and "type" not in narrow and narrow["title"] >= 24
+
+
+async def test_review_marks_and_batch_topic(make_app):
+    from citadel.ingest import Proposal
+    from citadel.tui.screens import ReviewScreen
+
+    app, _ = make_app()
+    calls = []
+    items = [
+        Proposal(f"paper{i}.pdf", "topic confidence 0.30", "x" * 64, topic="optics")
+        for i in range(3)
+    ]
+    async with app.run_test(size=(140, 40)) as pilot:
+        app.push_screen(
+            ReviewScreen(
+                items,
+                app.topic_paths(),
+                lambda action, names, **kw: calls.append((action, names, kw)),
+            )
+        )
+        await pilot.pause()
+        await pilot.press("v", "v")  # marks paper0 and paper1 (the cursor moves down)
+        assert app.screen.marked == {"paper0.pdf", "paper1.pdf"}
+        await pilot.press("t")
+        await pilot.pause()
+        await pilot.press(*"aero-optics", "enter")
+        await pilot.pause()
+        assert calls[-1] == (
+            "accept",
+            ["paper0.pdf", "paper1.pdf"],
+            {"topic": "optics/aero-optics"},
+        )
+        await pilot.press("R")
+        assert calls[-1] == ("retry", [""], {})
+        await pilot.press("V")
+        assert len(app.screen.marked) == 3

@@ -10,7 +10,7 @@
 
 from __future__ import annotations
 
-import shutil
+import hashlib
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -22,12 +22,17 @@ REVIEW = "_review"
 ATTACHMENTS = "_attachments"
 SPECIAL = (INBOX, REVIEW, ATTACHMENTS)
 TOPICS_FILE = "topics.toml"
+# Fingerprint of the default topics.toml the library's copy was made from: while the
+# copy still matches it, the user has not edited it and it can follow new defaults.
+TOPICS_ORIGIN = ".topics.default.sha256"
 
 
 @dataclass
 class InitReport:
     created: list[str] = field(default_factory=list)
     topics_file_created: bool = False
+    topics_file_updated: bool = False
+    topics_file_customised: bool = False  # edited by the user: left alone
 
 
 class Library:
@@ -62,15 +67,30 @@ class Library:
         """Create whatever is missing. Never moves, renames or deletes anything."""
         report = InitReport()
         self.root.mkdir(parents=True, exist_ok=True)
+        default = topics_module.DEFAULT_FILE.read_bytes()
+        origin = self.root / TOPICS_ORIGIN
         if not self.topics_file.exists():
-            shutil.copyfile(topics_module.DEFAULT_FILE, self.topics_file)
+            self._install_topics(default)
             report.topics_file_created = True
+        elif self.topics_file.read_bytes() != default:
+            current = _sha(self.topics_file.read_bytes())
+            if origin.exists() and origin.read_text().strip() == current:
+                self._install_topics(default)  # unedited copy of an older default
+                report.topics_file_updated = True
+            else:
+                report.topics_file_customised = True
         for name in (*SPECIAL, *(t.path for t in self.topics())):
             folder = self.root / name
             if not folder.is_dir():
                 folder.mkdir(parents=True)
                 report.created.append(name)
         return report
+
+    def _install_topics(self, content: bytes) -> None:
+        temporary = self.topics_file.with_name(f".{TOPICS_FILE}.tmp")
+        temporary.write_bytes(content)
+        temporary.replace(self.topics_file)
+        (self.root / TOPICS_ORIGIN).write_text(_sha(content) + "\n")
 
     def check(self) -> list[str]:
         """Problems with the library layout, as readable sentences (empty = healthy)."""
@@ -85,3 +105,7 @@ class Library:
             if not (self.root / name).is_dir():
                 problems.append(f"missing folder {name}/ (run `citadel init`)")
         return problems
+
+
+def _sha(content: bytes) -> str:
+    return hashlib.sha256(content).hexdigest()

@@ -37,3 +37,37 @@ def test_check_reports_problems(tmp_path):
     assert library.check() == [f"missing folder {INBOX}/ (run `citadel init`)"]
     library.topics_file.write_text('["Bad Name"]\n')
     assert "kebab-case" in library.check()[0]
+
+
+def test_unedited_topics_follow_new_defaults(tmp_path, monkeypatch):
+    from citadel import topics
+
+    old = tmp_path / "old.toml"
+    old.write_text('["optics"]\ndescription = "old"\n')
+    new = tmp_path / "new.toml"
+    new.write_text('["optics"]\ndescription = "new"\n["nuclear"]\n')
+    library = Library(tmp_path / "Citadel")
+
+    monkeypatch.setattr(topics, "DEFAULT_FILE", old)
+    library.init()
+    monkeypatch.setattr(topics, "DEFAULT_FILE", new)
+    report = library.init()
+    assert report.topics_file_updated and "nuclear" in library.topics_file.read_text()
+    assert (library.root / "nuclear").is_dir()
+
+
+def test_edited_topics_are_left_alone(tmp_path, monkeypatch):
+    from citadel import topics
+
+    old = tmp_path / "old.toml"
+    old.write_text('["optics"]\n')
+    new = tmp_path / "new.toml"
+    new.write_text('["nuclear"]\n')
+    library = Library(tmp_path / "Citadel")
+    monkeypatch.setattr(topics, "DEFAULT_FILE", old)
+    library.init()
+    library.topics_file.write_text('["optics"]\n["mine"]\n')
+    monkeypatch.setattr(topics, "DEFAULT_FILE", new)
+    report = library.init()
+    assert report.topics_file_customised and not report.topics_file_updated
+    assert "mine" in library.topics_file.read_text()
