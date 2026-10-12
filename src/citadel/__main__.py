@@ -15,6 +15,7 @@
     citadel review          list items waiting for review; accept, reject or retry them
     citadel convert         convert filed PDFs to Markdown on the GPU (Marker)
     citadel cite KEY…       formatted references, BibTeX entries or citekeys
+    citadel duplicates      list duplicates; keep one copy (the rest is deleted)
     citadel --version
 
 Every command accepts --json, for agents and scripts.
@@ -464,6 +465,57 @@ def cmd_cite(args: argparse.Namespace) -> int:
     return 1 if missing else 0
 
 
+def cmd_duplicates(args: argparse.Namespace) -> int:
+    from . import duplicates
+
+    session = Session()
+    try:
+        groups = duplicates.find(session.index, session.library)
+        if args.action == "list":
+            lines = []
+            for number, group in enumerate(groups, 1):
+                lines.append(f"{number}. {', '.join(group.reasons)}")
+                for m in group.members:
+                    badges = " ".join(
+                        b for b, on in (("md", m.has_markdown), ("notes", m.has_notes)) if on
+                    )
+                    lines.append(
+                        f"   {m.id:<48} {m.year or 'n.d.'}  {m.title[:50]}"
+                        + (f"  [{badges}]" if badges else "")
+                    )
+            emit(
+                {"groups": [g.as_dict() for g in groups]},
+                args.json,
+                "\n".join(lines) or "No duplicates.",
+            )
+            return 0
+        member = args.member
+        group = next(
+            (g for g in groups if any(m.id == member or m.key == member for m in g.members)), None
+        )
+        if group is None:
+            emit(
+                {"error": f"{member} is not in any duplicate group"},
+                args.json,
+                f"{member} is not in any duplicate group.",
+            )
+            return 1
+        if args.action == "ignore":
+            duplicates.ignore(session.library, group)
+            emit({"ignored": group.id}, args.json, "Marked as not duplicates.")
+            return 0
+        keep_id = next(m.id for m in group.members if m.id == member or m.key == member)
+        deleted = duplicates.keep(session.index, session.library, session.ingester, group, keep_id)
+    finally:
+        session.close()
+    emit(
+        {"kept": keep_id, "deleted": deleted},
+        args.json,
+        f"Kept {keep_id}; deleted (to OneDrive's recycle bin): " + ", ".join(deleted),
+    )
+    return 0
+
+
 def cmd_review(args: argparse.Namespace) -> int:
     session = Session()
     try:
@@ -595,6 +647,11 @@ def main(argv: list[str] | None = None) -> None:
         "--format", default="reference", choices=["reference", "bibtex", "key"]
     )
     cite_parser.set_defaults(func=cmd_cite)
+
+    dupes = sub.add_parser("duplicates", parents=[common], help="find and resolve duplicates")
+    dupes.add_argument("action", nargs="?", default="list", choices=["list", "keep", "ignore"])
+    dupes.add_argument("member", nargs="?", help="keep/ignore: a citekey or review file name")
+    dupes.set_defaults(func=cmd_duplicates)
 
     args = parser.parse_args(argv)
     if args.command is None:

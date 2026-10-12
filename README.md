@@ -48,7 +48,14 @@ citadel          # opens the TUI
 | `c` / `b` / `k` | copy the reference / BibTeX / citekey | `r` | unread → reading → read |
 | `e` | edit metadata (`Ctrl+S` saves) | `t` | move to another topic |
 | `m` | convert to Markdown (GPU) | `a` | add a PDF, `doi:…` or `arxiv:…` |
-| `i` | review queue (`a` accept, `t` other topic, `d` DOI, `x` reject) | `?` | about |
+| `i` | review queue (`a` accept, `t` other topic, `d` DOI, `x` reject, `v` mark, `R` retry) | `D` | duplicates: keep one copy |
+| `?` | about | | |
+
+The **MD** column: `✓` Markdown ready · `⟳` converting now · `·` not converted yet · `—` no PDF.
+
+Office documents (`.docx`, `.odt`, `.pptx`, …) are converted to PDF with LibreOffice and
+filed with the original kept next to the PDF; annexes and supplements of a filed
+reference (e.g. `ECSS-…-Annex-A.docx`) are attached to it under `attachments/`.
 
 ## Daily use
 
@@ -60,6 +67,7 @@ citadel add arxiv:2101.12345 | doi:10.… | paper.pdf
 citadel convert [CITEKEY…] [--all] [--force] [--ocr]
 citadel search "kelvin helmholtz" ; citadel get CITEKEY
 citadel cite CITEKEY… [--format reference|bibtex|key]
+citadel duplicates [keep|ignore CITEKEY-or-file]   # deleted copies go to OneDrive's recycle bin
 ```
 
 Every command takes `--json`.

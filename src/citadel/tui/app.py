@@ -26,6 +26,7 @@ from ..library import Library
 from . import logo
 from .screens import (
     AboutScreen,
+    DuplicatesScreen,
     EditScreen,
     PreviewScreen,
     Prompt,
@@ -43,7 +44,13 @@ VIEWS = [
     ("no-md", "Without Markdown"),
 ]
 STATUS_MARKS = {"unread": ("●", "accent"), "reading": ("◐", "warning"), "read": ("✓", "")}
-PDF_ICON, MD_ICON = "", ""  # nerd-font glyphs: PDF file, Markdown
+# Markdown column: converted, being converted right now, waiting, nothing to convert.
+MD_MARKS = {
+    "done": ("✓", "success"),
+    "converting": ("⟳", "accent"),
+    "waiting": ("·", ""),
+    "no-pdf": ("—", ""),
+}
 CITE_FORMATS = ("reference", "bibtex", "key")
 
 # (key, header, width, drop order): None width shares the spare room; higher drop
@@ -55,7 +62,7 @@ COLUMNS = [
     ("author", "Author", 16, 1),
     ("type", "Type", 10, 3),
     ("topic", "Topic", 24, 2),
-    ("files", "", 3, 0),
+    ("md", "MD", 2, 0),
 ]
 TITLE_MIN = 24
 
@@ -113,6 +120,7 @@ class Citadel(App):
         Binding("m", "convert", "Markdown"),
         Binding("a", "add", "Add"),
         Binding("i", "review", "Review"),
+        Binding("D", "duplicates", "Duplicates", show=False),
         Binding("tab", "focus_next", "Switch pane", show=False),
         Binding("question_mark", "about", "About", key_display="?"),
         Binding("q", "quit", "Quit"),
@@ -129,6 +137,8 @@ class Citadel(App):
         self.snippets: dict[str, str] = {}
         self.busy = ""  # what a background task is doing, for the top bar
         self.ingest_lock = threading.Lock()
+        self.converting_key = ""  # the reference being converted right now
+        self.duplicate_groups = []
 
     # -- layout ------------------------------------------------------------------------
 
@@ -162,7 +172,7 @@ class Citadel(App):
             self.theme = theme.name
         self.query_one("#search").display = False
         variables = self.get_css_variables()
-        self.tones = {name: variables.get(name, "") for name in ("accent", "warning")}
+        self.tones = {name: variables.get(name, "") for name in ("accent", "warning", "success")}
         tree = self.query_one("#topics", Tree)
         tree.show_root = False
         tree.guide_depth = 2
@@ -176,6 +186,7 @@ class Citadel(App):
         if self.library.exists():
             self.index.reindex()
         self.all_rows = self.index.list()
+        self.duplicate_groups = self.find_duplicates()
         self.refresh_stats()
         self.refresh_tree()
         self.refresh_table(keep)
@@ -198,11 +209,28 @@ class Citadel(App):
             parts.append(f"[b $warning]{inbox}[/] in inbox")
         if review:
             parts.append(f"[b $warning]{review}[/] to review [dim](i)[/]")
+        if self.duplicate_groups:
+            parts.append(
+                f"[b $error]{len(self.duplicate_groups)}[/] duplicate"
+                f"{'s' if len(self.duplicate_groups) > 1 else ''} [dim](D)[/]"
+            )
         self.query_one("#stats", Static).update(" · ".join(parts))
 
     def refresh_activity(self) -> None:
         """Conversion progress (from the status file the widget also reads), or a task."""
         live = status_module.read()
+        converting = (
+            live.current_citekey
+            if live and live.state == "converting" and time.time() - live.updated < 30
+            else ""
+        )
+        if converting != self.converting_key:
+            finished = self.converting_key
+            self.converting_key = converting
+            if finished:
+                self.reload(keep=self.current_key())  # its Markdown is ready: show ✓
+            else:
+                self.refresh_table()
         text = ""
         if live and live.state == "converting" and time.time() - live.updated < 30:
             gpu = f" · GPU {live.gpu['load']:.0f}%" if live.gpu else ""
@@ -300,12 +328,7 @@ class Citadel(App):
                 "author": clip(row["first_author"], layout.get("author", 16)),
                 "type": row["type"],
                 "topic": Text(clip(row["topic"], layout.get("topic", 24)), style="dim"),
-                "files": Text(
-                    (PDF_ICON if row["has_pdf"] else " ")
-                    + " "
-                    + (MD_ICON if row["has_fulltext"] else " "),
-                    style="dim",
-                ),
+                "md": self.markdown_mark(row),
             }
             table.add_row(*(cells[k] for k in layout), key=row["citekey"])
         title, empty = self.list_title()
@@ -316,6 +339,17 @@ class Citadel(App):
         if keep and keep in {r["citekey"] for r in self.rows}:
             table.move_cursor(row=table.get_row_index(keep))
         self.refresh_details()
+
+    def markdown_state(self, row: dict) -> str:
+        if row["has_fulltext"]:
+            return "done"
+        if row["citekey"] == self.converting_key:
+            return "converting"
+        return "waiting" if row["has_pdf"] else "no-pdf"
+
+    def markdown_mark(self, row: dict) -> Text:
+        mark, tone = MD_MARKS[self.markdown_state(row)]
+        return Text(f" {mark}", style=f"bold {self.tones[tone]}" if tone else "dim")
 
     def list_title(self) -> tuple[str, str]:
         count = len(self.rows)
@@ -613,6 +647,48 @@ class Citadel(App):
         self.reload(keep=citekey or None)
         if isinstance(self.screen, ReviewScreen):
             self.screen.refresh_items(items)
+
+    def find_duplicates(self):
+        from .. import duplicates
+
+        try:
+            return duplicates.find(self.index, self.library) if self.library.exists() else []
+        except OSError:
+            return []
+
+    def action_duplicates(self) -> None:
+        self.push_screen(DuplicatesScreen(self.duplicate_groups, self.resolve_duplicates))
+
+    @work(thread=True, group="ingest")
+    def resolve_duplicates(self, action: str, group, keep_id: str) -> None:
+        from .. import duplicates
+        from ..ingest import Ingester
+
+        with self.ingest_lock:
+            index = Index(paths.INDEX_FILE, self.library.root)
+            try:
+                if action == "ignore":
+                    duplicates.ignore(self.library, group)
+                    message = "Marked as not duplicates."
+                else:
+                    ingester = Ingester(self.library, index, None, self.config)
+                    deleted = duplicates.keep(index, self.library, ingester, group, keep_id)
+                    message = (
+                        f"Kept {keep_id.split(':', 1)[1]}; deleted {len(deleted)} "
+                        "(OneDrive recycle bin)"
+                    )
+            except (OSError, ValueError, LookupError) as error:
+                self.call_from_thread(self.notify, str(error), severity="error")
+                return
+            finally:
+                index.close()
+        self.call_from_thread(self.notify, message)
+        self.call_from_thread(self.after_duplicates)
+
+    def after_duplicates(self) -> None:
+        self.reload()
+        if isinstance(self.screen, DuplicatesScreen):
+            self.screen.refresh_groups(self.duplicate_groups)
 
     def action_about(self) -> None:
         self.push_screen(AboutScreen(__version__, str(self.library.root)))

@@ -67,9 +67,10 @@ def details_markup(ref: Reference) -> str:
         ("arXiv", ref.arxiv),
         ("ISBN", ref.isbn),
         ("Tags", ", ".join(ref.tags)),
+        ("Attached", ", ".join(ref.attachments)),
         ("Citekey", ref.citekey),
         ("Status", ref.status),
-        ("Markdown", ref.md_engine or "not converted yet"),
+        ("Markdown", f"✓ {ref.md_engine}" if ref.md_engine else "· not converted yet (m)"),
     ]
     return "\n".join(f"[dim]{k:<10}[/] {escape(str(v))}" for k, v in rows if v)
 
@@ -450,6 +451,10 @@ class ReviewScreen(ModalScreen[None]):
             return [item for item in self.items if item.file in self.marked]
         return [self.current] if self.current else []
 
+    @on(OptionList.OptionSelected, "#review-list")
+    def item_chosen(self) -> None:
+        self.action_accept()  # Enter on an item: accept it
+
     def action_mark(self) -> None:
         item = self.current
         if item:
@@ -563,6 +568,160 @@ class ReviewScreen(ModalScreen[None]):
             self.app.push_screen(PreviewScreen(ref, pdf.parent, pdf=pdf))
 
 
+class DuplicatesScreen(ModalScreen[None]):
+    """Duplicate groups; pick the copy to keep and the others are deleted."""
+
+    BINDINGS = [
+        Binding("escape,q,D", "dismiss", "Close"),
+        Binding("enter,k", "keep", "Keep this one"),
+        Binding("n", "not_duplicates", "Not duplicates"),
+        Binding("space", "preview", "Preview"),
+        Binding("tab", "switch", "Groups ⇄ copies", show=False),
+    ]
+
+    def __init__(self, groups, resolve) -> None:
+        super().__init__()
+        self.groups = groups  # list[duplicates.Group]
+        self.resolve = resolve  # callable(action, group, keep_id) run by the app
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="duplicates"):
+            yield Static(id="dup-title", classes="title")
+            with Horizontal():
+                yield OptionList(id="dup-groups")
+                with Vertical(id="dup-right"):
+                    yield Static(id="dup-reasons", classes="subtitle")
+                    yield OptionList(id="dup-members")
+            yield Static(
+                "[dim][b]Tab[/] groups ⇄ copies · [b]Enter[/] keep the highlighted copy and "
+                "delete the others · [b]n[/] not duplicates · [b]Space[/] preview · "
+                "[b]Esc[/] close\nDeleted files go to OneDrive's recycle bin (30 days).[/]",
+                classes="footnote",
+            )
+
+    def on_mount(self) -> None:
+        self.refresh_groups(self.groups)
+        self.query_one("#dup-members").focus()
+
+    def refresh_groups(self, groups) -> None:
+        self.groups = groups
+        self.query_one("#dup-title", Static).update(
+            f"Duplicates · {len(groups)} group{'s' if len(groups) != 1 else ''}"
+            if groups
+            else "Duplicates · none"
+        )
+        options = self.query_one("#dup-groups", OptionList)
+        index = options.highlighted or 0
+        options.clear_options()
+        for group in groups:
+            options.add_option(
+                Option(f"{escape(group.members[0].title[:40])}  [dim]×{len(group.members)}[/]")
+            )
+        if groups:
+            options.highlighted = min(index, len(groups) - 1)
+        self.show_members()
+
+    @property
+    def group(self):
+        options = self.query_one("#dup-groups", OptionList)
+        if options.highlighted is None or not self.groups:
+            return None
+        return self.groups[options.highlighted]
+
+    @on(OptionList.OptionHighlighted, "#dup-groups")
+    def show_members(self) -> None:
+        group = self.group
+        members = self.query_one("#dup-members", OptionList)
+        members.clear_options()
+        reasons = self.query_one("#dup-reasons", Static)
+        if group is None:
+            reasons.update("[dim]No duplicates in the library.[/]")
+            return
+        reasons.update(f"[b $warning]{escape(', '.join(group.reasons))}[/]")
+        for m in group.members:
+            badges = []
+            if m.has_markdown:
+                badges.append("[b $success]✓ Markdown[/]")
+            if m.has_notes:
+                badges.append("[b $accent]✎ notes[/]")
+            if m.attachments:
+                badges.append(f"📎 {m.attachments}")
+            if not m.has_pdf:
+                badges.append("[dim]no PDF[/]")
+            where = "in review" if m.kind == "review" else "filed"
+            members.add_option(
+                Option(
+                    f"[b]{escape(m.title[:70])}[/]\n"
+                    f"  {m.year or 'n.d.'} · {escape(m.first_author)} · {where} · "
+                    f"[dim]{escape(m.location)}[/]\n  {' · '.join(badges) or '[dim]—[/]'}",
+                    id=m.id,
+                )
+            )
+        members.highlighted = 0
+
+    @on(OptionList.OptionSelected, "#dup-members")
+    def member_chosen(self) -> None:
+        self.action_keep()  # Enter on a copy: keep it
+
+    def action_switch(self) -> None:
+        groups, members = self.query_one("#dup-groups"), self.query_one("#dup-members")
+        (members if groups.has_focus else groups).focus()
+
+    def current_member(self):
+        members = self.query_one("#dup-members", OptionList)
+        group = self.group
+        if group is None or members.highlighted is None:
+            return None
+        return group.members[members.highlighted]
+
+    def action_keep(self) -> None:
+        group, kept = self.group, self.current_member()
+        if not kept:
+            return
+        others = [m for m in group.members if m is not kept]
+        losing = [
+            m
+            for m in others
+            if (m.has_notes and not kept.has_notes) or (m.has_markdown and not kept.has_markdown)
+        ]
+        warning = ""
+        if losing:
+            warning = (
+                "\n\n[b $warning]Careful:[/] "
+                + ", ".join(m.key for m in losing)
+                + " has notes or Markdown that the kept copy lacks."
+            )
+        question = (
+            f"Keep [b]{escape(kept.key)}[/] and delete {len(others)} other "
+            f"cop{'ies' if len(others) > 1 else 'y'}?{warning}"
+        )
+        self.app.push_screen(
+            ConfirmScreen(question), lambda yes: yes and self.resolve("keep", group, kept.id)
+        )
+
+    def action_not_duplicates(self) -> None:
+        group = self.group
+        if group:
+            self.app.push_screen(
+                ConfirmScreen("Mark this group as not duplicates? It will not be shown again."),
+                lambda yes: yes and self.resolve("ignore", group, ""),
+            )
+
+    def action_preview(self) -> None:
+        member = self.current_member()
+        if member is None:
+            return
+        library = self.app.library
+        if member.kind == "review":
+            pdf = library.review / member.key
+            ref = Reference(citekey="(in review)", title=member.title, year=member.year)
+            self.app.push_screen(PreviewScreen(ref, pdf.parent, pdf=pdf))
+        else:
+            folder = library.root / member.location
+            ref, body = record.read(folder / f"{folder.name}.md")
+            self.app.push_screen(PreviewScreen(ref, folder, body=body))
+
+
 class AboutScreen(ModalScreen[None]):
     BINDINGS = [Binding("escape,question_mark,space,q", "dismiss", "Close")]
 
@@ -582,6 +741,8 @@ class AboutScreen(ModalScreen[None]):
                 "[b]Space[/] preview · [b]Enter[/] open PDF · [b]/[/] search · "
                 "[b]c[/] copy reference · [b]b[/] BibTeX · [b]k[/] citekey · "
                 "[b]r[/] read status · [b]e[/] edit · [b]t[/] move to topic · "
-                "[b]m[/] convert to Markdown · [b]a[/] add · [b]i[/] review queue",
+                "[b]m[/] convert to Markdown · [b]a[/] add · [b]i[/] review queue · "
+                "[b]D[/] duplicates\n\n[dim]MD column: [b]✓[/] Markdown ready · [b]⟳[/] "
+                "converting · [b]·[/] not yet · [b]—[/] no PDF[/]",
                 classes="details",
             )

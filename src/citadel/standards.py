@@ -75,7 +75,7 @@ def recognise(pdf: PdfText) -> Metadata | None:
             match = body.pattern.search(line)
             # The identifier must be (almost) the whole line: "ECSS-Q-ST-60-15C Rev.1".
             if match and len(line) <= len(match.group(0)) + 12:
-                return _metadata(body, _tidy(match.group(0)), pdf, header)
+                return _metadata(body, tidy(match.group(0)), pdf, header)
     return None
 
 
@@ -117,7 +117,7 @@ def _year(identifier: str, pdf: PdfText, header: list[str]) -> int | None:
     return int(found.group(1)) if found else None
 
 
-def _tidy(identifier: str) -> str:
+def tidy(identifier: str) -> str:
     identifier = re.sub(r"\s+", " ", identifier).strip()
     identifier = re.sub(r"Rev\.?\s*(\d+)", r"Rev.\1", identifier, flags=re.IGNORECASE)
     return identifier.upper().replace("REV.", "Rev.")

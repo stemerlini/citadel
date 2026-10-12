@@ -131,7 +131,10 @@ def test_names_are_never_reused(setup):
     ingester, library, index, state = setup
     drop(library, "a.pdf", b"%PDF a")
     ingester.process_inbox()
-    state["meta"] = Metadata(**{**GOOD.__dict__, "doi": "10.1088/other"})
+    # A different paper whose short name collides: "…: part 2" (the subtitle is dropped).
+    state["meta"] = Metadata(
+        **{**GOOD.__dict__, "doi": "10.1088/other", "title": GOOD.title + ": part 2"}
+    )
     drop(library, "b.pdf", b"%PDF b")
     [result] = ingester.process_inbox()
     assert result.citekey == "settles2017reviewb"
@@ -187,11 +190,92 @@ def test_dry_run_changes_nothing(setup):
     assert source.exists() and not any(library.review.iterdir())
 
 
-def test_non_pdfs_wait_in_review(setup):
+def test_unconvertible_office_files_wait_in_review(setup, monkeypatch):
     ingester, library, _, _ = setup
+    monkeypatch.setattr(ingest_module.office, "to_pdf", lambda path, folder: None)
     drop(library, "slides.pptx", b"PK")
     [result] = ingester.process_inbox()
-    assert result.status == "review" and "only PDFs" in result.reason
+    assert result.status == "review" and "could not convert" in result.reason
+    assert (library.review / "slides.pptx").exists()
+
+
+def test_other_files_wait_in_review(setup):
+    ingester, library, _, _ = setup
+    drop(library, "data.h5", b"HDF")
+    [result] = ingester.process_inbox()
+    assert result.status == "review" and ".h5 files are not handled" in result.reason
+
+
+def fake_conversion(monkeypatch):
+    def to_pdf(path, folder):
+        pdf = folder / f"{path.stem}.pdf"
+        pdf.write_bytes(b"%PDF converted " + path.read_bytes())
+        return pdf
+
+    monkeypatch.setattr(ingest_module.office, "to_pdf", to_pdf)
+
+
+def test_office_documents_are_converted_and_kept(setup, monkeypatch):
+    ingester, library, _, _ = setup
+    fake_conversion(monkeypatch)
+    source = drop(library, "report.docx", b"PK word")
+    [result] = ingester.process_inbox()
+    assert result.status == "filed" and result.file.endswith("report.docx")
+    folder = library.root / result.folder
+    assert (folder / f"{folder.name}.pdf").read_bytes() == b"%PDF converted PK word"
+    assert (folder / f"{folder.name}.docx").read_bytes() == b"PK word"
+    assert not source.exists()
+
+
+def test_office_documents_in_review_show_the_original(setup, monkeypatch):
+    ingester, library, _, state = setup
+    fake_conversion(monkeypatch)
+    state["confidence"] = 0.5
+    drop(library, "report.docx", b"PK word")
+    [result] = ingester.process_inbox()
+    assert result.status == "review"
+    [item] = ingester.review_items()
+    assert item.file == "report.docx" and (library.review / "report.docx").exists()
+    accepted = ingester.accept("report.docx")
+    folder = library.root / accepted.folder
+    assert (folder / f"{folder.name}.docx").exists() and (folder / f"{folder.name}.pdf").exists()
+    assert not (library.review / "report.docx").exists()
+
+
+def test_annexes_are_attached_to_their_standard(setup, monkeypatch):
+    ingester, library, index, state = setup
+    state["meta"] = Metadata(
+        title="ECSS-Q-ST-60-15C Rev.1: Radiation hardness assurance - EEE components",
+        authors=["ECSS"],
+        year=2025,
+        type="standard",
+    )
+    drop(library, "standard.pdf", b"%PDF the standard")
+    [standard] = ingester.process_inbox()
+    assert standard.status == "filed"
+
+    annex = drop(library, "ECSS-Q-ST-60-15C-Rev.1(20March2025)-Annex-A.docx", b"PK annex")
+    monkeypatch.setattr(ingest_module.office, "title", lambda path: "ECSS-Q-ST-60-15C Rev.1")
+    [result] = ingester.process_inbox()
+    assert result.status == "filed" and result.reason == f"attached to {standard.citekey}"
+    folder = library.root / standard.folder
+    assert (folder / "attachments" / annex.name).read_bytes() == b"PK annex"
+    ref, _ = ingest_module.record.read(folder / f"{folder.name}.md")
+    assert ref.attachments == [annex.name]
+    assert not annex.exists()
+
+
+def test_a_lookalike_without_annex_words_is_not_attached(setup):
+    ingester, library, _, state = setup
+    state["meta"] = Metadata(
+        title="ECSS-Q-ST-60-15C Rev.1: Radiation hardness",
+        year=2025,
+        authors=["ECSS"],
+        type="standard",
+    )
+    drop(library, "standard.pdf", b"%PDF the standard")
+    ingester.process_inbox()
+    assert ingester.parent_of(library.inbox / "ECSS-Q-ST-60-15C-Rev.1 notes.pdf") is None
 
 
 def test_metadata_only_reference(setup):
@@ -270,3 +354,14 @@ def test_same_doi_in_one_batch_is_caught(setup):
     first, second = ingester.process_inbox()
     assert first.status == "filed"
     assert second.status == "review" and "same DOI" in second.reason
+
+
+def test_same_title_year_author_is_flagged_on_arrival(setup):
+    ingester, library, _, state = setup
+    drop(library, "a.pdf", b"%PDF journal")
+    ingester.process_inbox()
+    state["meta"] = Metadata(**{**GOOD.__dict__, "doi": ""})  # e.g. an author's own copy
+    drop(library, "b.pdf", b"%PDF other bytes")
+    [result] = ingester.process_inbox()
+    assert result.status == "review"
+    assert result.reason == "same title, year and author as settles2017review"

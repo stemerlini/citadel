@@ -133,7 +133,7 @@ async def test_edit_saves_changes(make_app):
 
 def test_table_layout_drops_columns_when_narrow():
     wide = table_layout(160, show_topic=True)
-    assert set(wide) == {"status", "year", "title", "author", "type", "topic", "files"}
+    assert set(wide) == {"status", "year", "title", "author", "type", "topic", "md"}
     narrow = table_layout(70, show_topic=True)
     assert "topic" not in narrow and "type" not in narrow and narrow["title"] >= 24
 
@@ -172,3 +172,43 @@ async def test_review_marks_and_batch_topic(make_app):
         assert calls[-1] == ("retry", [""], {})
         await pilot.press("V")
         assert len(app.screen.marked) == 3
+
+
+async def test_markdown_column_shows_each_state(make_app):
+    app, _ = make_app()
+    async with app.run_test(size=(140, 40)) as pilot:
+        await pilot.pause()
+        rows = {r["citekey"]: r for r in app.rows}
+        assert app.markdown_state(rows["verma2004statistical"]) == "done"
+        assert app.markdown_state(rows["harding2009observation"]) == "no-pdf"
+        waiting = dict(rows["verma2004statistical"], has_fulltext=0)
+        assert app.markdown_state(waiting) == "waiting"
+        app.converting_key = "verma2004statistical"
+        assert app.markdown_state(waiting) == "converting"
+        assert app.markdown_mark(waiting).plain == " ⟳"
+
+
+async def test_duplicates_screen_keep_and_ignore(make_app):
+    from citadel.duplicates import Group, Member
+    from citadel.tui.screens import ConfirmScreen, DuplicatesScreen
+
+    app, _ = make_app()
+    group = Group(
+        ["identical file"],
+        [
+            Member("reference", "a2020x", "A paper", 2020, "Smith", "optics/a", True, True, True),
+            Member("review", "a copy.pdf", "A paper", None, "", "_review/a copy.pdf", True),
+        ],
+    )
+    calls = []
+    async with app.run_test(size=(140, 40)) as pilot:
+        app.push_screen(DuplicatesScreen([group], lambda *args: calls.append(args)))
+        await pilot.pause()
+        await pilot.press("down", "enter")  # keep the copy in review
+        await pilot.pause()
+        assert isinstance(app.screen, ConfirmScreen)
+        assert "notes or Markdown" in str(app.screen.question)  # warns about losing them
+        await pilot.press("y")
+        assert calls[-1] == ("keep", group, "review:a copy.pdf")
+        await pilot.press("n", "y")
+        assert calls[-1] == ("ignore", group, "")

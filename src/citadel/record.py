@@ -76,6 +76,7 @@ class Reference:
     source: str = ""  # inbox | migration | agent:<name> | doi | manual
     metadata_confidence: float | None = None
     md_engine: str = ""
+    attachments: list[str] = field(default_factory=list)  # files in attachments/
     pdf_sha256: str = ""
     basename: str = ""  # folder and file name; fixed once filed
     extra: dict = field(default_factory=dict)  # unknown keys, kept as they are
@@ -120,7 +121,7 @@ def _clean(key: str, value):
     """Normalise what YAML hands back: dates as ISO strings, lists of strings, ints."""
     if isinstance(value, dt.date):
         return value.isoformat()
-    if key in ("authors", "tags", "projects", "collections"):
+    if key in ("authors", "tags", "projects", "collections", "attachments"):
         if value is None:
             return []
         return [str(v) for v in value] if isinstance(value, list) else [str(value)]

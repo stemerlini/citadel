@@ -18,17 +18,18 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import re
 import shutil
 import tempfile
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-from . import naming, paths, record, sources
+from . import naming, office, paths, record, sources, standards
 from .classify import Classifier
 from .config import Config
 from .identifiers import ARXIV_NEW, ARXIV_OLD, clean_doi, find_dois
-from .identify import Identification, identify_text
+from .identify import Identification, identify_text, normal_words
 from .index import Index
 from .library import Library
 from .pdf import PdfText, sha256
@@ -37,6 +38,11 @@ from .record import Reference
 from .sources import Http, Metadata
 
 PROPOSAL_SUFFIX = ".citadel.json"
+ATTACHMENTS = "attachments"
+# Words that make a file part of another reference rather than a reference itself.
+COMPANION = re.compile(
+    r"\b(annex|appendix|supplement(?:ary)?|attachment|addendum)\b", re.IGNORECASE
+)
 TEMPORARY_SUFFIXES = (".part", ".crdownload", ".download", ".tmp", ".partial", ".opdownload")
 
 
@@ -140,14 +146,50 @@ class Ingester:
             return Result(str(path), "error", f"{type(error).__name__}: {error}")
 
     def _ingest(self, path, source, keep_source, known, chosen_topic, dry_run) -> Result:
+        parent = self.parent_of(path)
+        if parent:
+            return self._attach(path, parent, keep_source, dry_run)
+        if office.is_office(path):
+            return self._ingest_office(path, source, keep_source, known, chosen_topic, dry_run)
         if path.suffix.lower() != ".pdf":
             return self._review_or_report(
                 path,
-                Proposal(path.name, "only PDFs are identified so far", sha256(path)),
+                Proposal(
+                    path.name, f"{path.suffix or 'this'} files are not handled yet", sha256(path)
+                ),
                 keep_source,
                 dry_run,
                 source,
             )
+        return self._ingest_pdf(path, source, keep_source, known, chosen_topic, dry_run)
+
+    def _ingest_office(self, path, source, keep_source, known, chosen_topic, dry_run) -> Result:
+        """Convert to PDF, then file like any PDF; the original is kept next to it."""
+        with tempfile.TemporaryDirectory(prefix="citadel-office-", dir=_scratch()) as tmp:
+            pdf = office.to_pdf(path, Path(tmp))
+            if pdf is None:
+                return self._review_or_report(
+                    path,
+                    Proposal(path.name, "LibreOffice could not convert it to PDF", sha256(path)),
+                    keep_source,
+                    dry_run,
+                    source,
+                )
+            return self._ingest_pdf(
+                pdf, source, keep_source, known, chosen_topic, dry_run, original=path
+            )
+
+    def _ingest_pdf(
+        self, path, source, keep_source, known, chosen_topic, dry_run, original: Path | None = None
+    ) -> Result:
+        """original: the office document a converted PDF came from. Review shows the
+        original, and filing keeps it next to the PDF."""
+        shown = original or path
+
+        def review(proposal: Proposal) -> Result:
+            if original:
+                proposal.file, proposal.sha256 = original.name, sha256(original)
+            return self._review_or_report(shown, proposal, keep_source, dry_run, source)
 
         digest = sha256(path)
         duplicate = self.index.find_sha256(digest)
@@ -155,7 +197,7 @@ class Ingester:
             proposal = Proposal(
                 path.name, f"identical to {duplicate}", digest, duplicate_of=duplicate
             )
-            return self._review_or_report(path, proposal, keep_source, dry_run, source)
+            return review(proposal)
 
         pdf = read_pdf(path)
         if known:
@@ -173,7 +215,15 @@ class Ingester:
             if existing:
                 proposal = self._proposal(path, digest, found, f"same DOI as {existing}", pdf)
                 proposal.duplicate_of = existing
-                return self._review_or_report(path, proposal, keep_source, dry_run, source)
+                return review(proposal)
+        if meta:
+            existing = self._same_title(meta)
+            if existing:
+                proposal = self._proposal(
+                    path, digest, found, f"same title, year and author as {existing}", pdf
+                )
+                proposal.duplicate_of = existing
+                return review(proposal)
 
         if chosen_topic:
             topic, topic_confidence, explain = chosen_topic, 1.0, "chosen"
@@ -193,11 +243,11 @@ class Ingester:
             proposal = self._proposal(path, digest, found, "; ".join(problems), pdf)
             proposal.topic, proposal.topic_confidence = topic, topic_confidence
             proposal.topic_explain = explain
-            return self._review_or_report(path, proposal, keep_source, dry_run, source)
+            return review(proposal)
 
         if dry_run:
             return Result(
-                str(path),
+                str(shown),
                 "dry-run",
                 "would be filed",
                 title=meta.title,
@@ -205,9 +255,20 @@ class Ingester:
                 topic=topic,
                 topic_confidence=topic_confidence,
             )
-        ref = self.file(path, meta, topic, found.confidence, source, digest, keep_source)
+        ref = self.file(
+            path,
+            meta,
+            topic,
+            found.confidence,
+            source,
+            digest,
+            keep_source=keep_source or original is not None,
+            extras=[original] if original else [],
+        )
+        if original and not keep_source:
+            original.unlink()
         return Result(
-            str(path),
+            str(shown),
             "filed",
             explain,
             ref.citekey,
@@ -217,6 +278,16 @@ class Ingester:
             topic,
             topic_confidence,
         )
+
+    def _same_title(self, meta: Metadata) -> str | None:
+        author = naming.surname(meta.authors[0]) if meta.authors else ""
+        key = title_key(meta.title, meta.year, author)
+        if key is None:
+            return None
+        for row in self.index.list():
+            if title_key(row["title"], row["year"], row["first_author"]) == key:
+                return row["citekey"]
+        return None
 
     def _classify(self, meta: Metadata | None, pdf: PdfText) -> tuple[str, float, str]:
         if meta is None and not pdf.has_text:
@@ -288,6 +359,7 @@ class Ingester:
         source: str,
         digest: str,
         keep_source: bool = False,
+        extras: list[Path] = (),
     ) -> Reference:
         """Create the reference folder with the PDF and its record. The source file is
         removed only after its copy has been verified (unless keep_source)."""
@@ -296,6 +368,10 @@ class Ingester:
         folder.mkdir(parents=True)  # never reuse an existing folder
         try:
             _verified_copy(path, folder / f"{ref.basename}.pdf", digest)
+            for extra in extras:  # e.g. the .docx a PDF was made from
+                _verified_copy(
+                    extra, folder / f"{ref.basename}{extra.suffix.lower()}", sha256(extra)
+                )
             record.write_new(folder / f"{ref.basename}.md", ref)
         except BaseException:
             shutil.rmtree(folder, ignore_errors=True)  # only what was just created
@@ -313,6 +389,61 @@ class Ingester:
         record.write_new(folder / f"{ref.basename}.md", ref)
         self.index.add(folder / f"{ref.basename}.md")
         return ref
+
+    # -- companions: annexes and supplements of a filed reference ---------------------
+
+    def parent_of(self, path: Path) -> str | None:
+        """The citekey of the filed reference this file belongs to (an annex of a
+        standard, a supplement…), or None. It must call itself an annex/appendix/
+        supplement and name its parent's identifier."""
+        doc_title = office.title(path) if office.is_office(path) else ""
+        if not (COMPANION.search(path.stem.replace("_", " ")) or COMPANION.search(doc_title)):
+            return None
+        for text in (doc_title, re.sub(r"[-_]Rev\.?", " Rev.", path.stem)):
+            for body in standards.BODIES:
+                match = body.pattern.search(text)
+                if not match:
+                    continue
+                identifier = standards.tidy(match.group(0))
+                for row in self.index.list():
+                    if row["title"] == identifier or row["title"].startswith(f"{identifier}:"):
+                        return row["citekey"]
+        return None
+
+    def _attach(self, path: Path, citekey: str, keep_source: bool, dry_run: bool) -> Result:
+        row = self.index.get(citekey)
+        if dry_run:
+            return Result(
+                str(path),
+                "dry-run",
+                f"would be attached to {citekey}",
+                citekey,
+                row["folder"],
+                row["title"],
+            )
+        folder = self.index.root / row["folder"]
+        attachments = folder / ATTACHMENTS
+        attachments.mkdir(exist_ok=True)
+        name = _free_name(attachments, path.name)
+        _verified_copy(path, attachments / name, sha256(path))
+        md = folder / f"{folder.name}.md"
+        ref, _ = record.read(md)
+        ref.attachments = [*ref.attachments, name]
+        record.update_metadata(md, ref)
+        self.index.add(md)
+        if not keep_source:
+            path.unlink()
+        return Result(
+            str(path),
+            "filed",
+            f"attached to {citekey}",
+            citekey,
+            f"{row['folder']}/{ATTACHMENTS}/{name}",
+            row["title"],
+            1.0,
+            row["topic"],
+            1.0,
+        )
 
     # -- adding by hand or by agents ---------------------------------------------
 
@@ -441,11 +572,15 @@ class Ingester:
             raise LookupError(f"{len(matches)} review items match {name!r}")
         return matches[0]
 
-    def accept(self, name: str, topic: str = "", doi: str = "", type: str = "") -> Result:
-        """File a review item, optionally correcting its topic, DOI (metadata) or type."""
+    def accept(
+        self, name: str, topic: str = "", doi: str = "", type: str = "", force: bool = False
+    ) -> Result:
+        """File a review item, optionally correcting its topic, DOI (metadata) or type.
+        force: file it even though it was flagged as a duplicate (the duplicates
+        screen does this for the copy the user keeps)."""
         proposal = self.find_review(name)
         path = self.library.review / proposal.file
-        if proposal.duplicate_of:
+        if proposal.duplicate_of and not force:
             raise ValueError(
                 f"{proposal.file} duplicates {proposal.duplicate_of}: reject it instead"
             )
@@ -464,9 +599,26 @@ class Ingester:
         topic = topic or proposal.topic
         if not topic:
             raise ValueError(f"{proposal.file} has no topic: accept it with --topic")
-        if path.suffix.lower() != ".pdf":
-            raise ValueError("only PDFs can be filed so far")
-        ref = self.file(path, meta, topic, confidence, proposal.source, proposal.sha256)
+        if path.suffix.lower() != ".pdf" and not office.is_office(path):
+            raise ValueError(f"{path.suffix} files cannot be filed yet")
+        if office.is_office(path):
+            with tempfile.TemporaryDirectory(prefix="citadel-office-", dir=_scratch()) as tmp:
+                pdf = office.to_pdf(path, Path(tmp))
+                if pdf is None:
+                    raise ValueError("LibreOffice could not convert it to PDF")
+                ref = self.file(
+                    pdf,
+                    meta,
+                    topic,
+                    confidence,
+                    proposal.source,
+                    sha256(pdf),
+                    keep_source=True,
+                    extras=[path],
+                )
+            path.unlink()
+        else:
+            ref = self.file(path, meta, topic, confidence, proposal.source, proposal.sha256)
         (self.library.review / f"{proposal.file}{PROPOSAL_SUFFIX}").unlink(missing_ok=True)
         self.index.reindex()
         return Result(
@@ -491,7 +643,8 @@ class Ingester:
         scratch.mkdir(parents=True, exist_ok=True)
         filed = False
         for proposal in items:
-            if proposal.duplicate_of or not proposal.file.lower().endswith(".pdf"):
+            name = Path(proposal.file.lower())
+            if proposal.duplicate_of or not (name.suffix == ".pdf" or office.is_office(name)):
                 continue  # nothing new to learn about these
             path = self.library.review / proposal.file
             sidecar = self.library.review / f"{proposal.file}{PROPOSAL_SUFFIX}"
@@ -572,3 +725,17 @@ def parse_target(target: str) -> tuple[str, str]:
             if match:
                 return "arxiv", match.group(1)
     return "pdf", target
+
+
+def _scratch() -> Path:
+    folder = paths.CACHE_DIR / "ingest"
+    folder.mkdir(parents=True, exist_ok=True)
+    return folder
+
+
+def title_key(title: str, year, author: str) -> str | None:
+    """Same title, year and first author: a duplicate even with other bytes and no DOI."""
+    words = normal_words(title)
+    if len(words) < 3 or not author:
+        return None
+    return f"{' '.join(words)}|{year or ''}|{author.lower()}"
