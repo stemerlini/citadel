@@ -212,3 +212,38 @@ async def test_duplicates_screen_keep_and_ignore(make_app):
         assert calls[-1] == ("keep", group, "review:a copy.pdf")
         await pilot.press("n", "y")
         assert calls[-1] == ("ignore", group, "")
+
+
+async def test_review_edit_sends_corrections(make_app):
+    from citadel.ingest import Proposal
+    from citadel.tui.screens import EditScreen, ReviewScreen
+
+    app, _ = make_app()
+    calls = []
+    item = Proposal(
+        "slides.pdf",
+        "metadata confidence 0.30",
+        "x" * 64,
+        metadata={"title": "Wrong title", "authors": ["Hall, G."], "year": 1994},
+    )
+    async with app.run_test(size=(140, 50)) as pilot:
+        app.push_screen(
+            ReviewScreen(
+                [item],
+                app.topic_paths(),
+                lambda action, names, **kw: calls.append((action, names, kw)),
+            )
+        )
+        await pilot.pause()
+        await pilot.press("e")
+        await pilot.pause()
+        assert isinstance(app.screen, EditScreen)
+        app.screen.query_one("#edit-title").value = "Detector physics"
+        app.screen.query_one("#edit-authors").value = "Bindi, Marcello"
+        app.screen.query_one("#edit-year").value = "2021"
+        await pilot.press("ctrl+s")
+        await pilot.pause()
+        action, names, changes = calls[-1]
+        assert (action, names) == ("edit", ["slides.pdf"])
+        assert changes["title"] == "Detector physics" and changes["year"] == 2021
+        assert changes["authors"] == ["Bindi, Marcello"] and "tags" not in changes

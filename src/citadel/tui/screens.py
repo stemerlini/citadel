@@ -387,6 +387,7 @@ class ReviewScreen(ModalScreen[None]):
         Binding("a,enter", "accept", "Accept"),
         Binding("t", "accept_topic", "Other topic"),
         Binding("d", "accept_doi", "Use DOI"),
+        Binding("e", "edit", "Fix metadata"),
         Binding("x", "reject", "Reject"),
         Binding("v", "mark", "Mark"),
         Binding("V", "mark_all", "Mark all", show=False),
@@ -410,7 +411,8 @@ class ReviewScreen(ModalScreen[None]):
                     yield Static(id="review-details")
             yield Static(
                 "[dim][b]a[/] accept · [b]t[/] accept with another topic · "
-                "[b]d[/] accept with a DOI · [b]x[/] reject · [b]v[/] mark (V all) · "
+                "[b]d[/] accept with a DOI · [b]e[/] fix the metadata first · "
+                "[b]x[/] reject · [b]v[/] mark (V all) · "
                 "[b]R[/] retry all · [b]Space[/] preview · [b]Esc[/] close\n"
                 "With items marked, a / t / x act on all of them.[/]",
                 classes="footnote",
@@ -528,6 +530,32 @@ class ReviewScreen(ModalScreen[None]):
                 Prompt("Accept with a DOI", "10.…", "Citadel takes the metadata from Crossref."),
                 lambda doi: doi and self.settle("accept", [item.file], doi=doi),
             )
+
+    def action_edit(self) -> None:
+        """Correct the title, authors, year… before filing: names are made from them."""
+        item = self.current
+        if item is None:
+            return
+        meta = item.metadata or {}
+        ref = Reference(
+            citekey=item.file,
+            title=meta.get("title") or Path(item.file).stem,
+            type=meta.get("type") or "article",
+            authors=meta.get("authors") or [],
+            year=meta.get("year"),
+            journal=meta.get("journal", ""),
+            volume=meta.get("volume", ""),
+            pages=meta.get("pages", ""),
+            doi=meta.get("doi", ""),
+            abstract=meta.get("abstract", ""),
+        )
+
+        def save(changes: dict | None) -> None:
+            changes = {k: v for k, v in (changes or {}).items() if k != "tags"}
+            if changes:
+                self.settle("edit", [item.file], **changes)
+
+        self.app.push_screen(EditScreen(ref), save)
 
     def action_reject(self) -> None:
         targets = self.targets()

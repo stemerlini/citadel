@@ -543,6 +543,17 @@ def cmd_review(args: argparse.Namespace) -> int:
             return 1
         try:
             if args.action == "accept":
+                corrections = {
+                    k: v
+                    for k, v in (
+                        ("title", args.title),
+                        ("authors", args.author),
+                        ("year", args.year),
+                    )
+                    if v
+                }
+                if corrections:
+                    ingester.edit_review(args.item, **corrections)
                 result = ingester.accept(args.item, topic=args.topic, doi=args.doi, type=args.type)
             else:
                 result = ingester.reject(args.item)
@@ -629,6 +640,14 @@ def main(argv: list[str] | None = None) -> None:
     review.add_argument("--topic", default="", help="accept: topic folder")
     review.add_argument("--doi", default="", help="accept: take the metadata from this DOI")
     review.add_argument("--type", default="", help="accept: document type (book, article…)")
+    review.add_argument("--title", default="", help="accept: the correct title")
+    review.add_argument(
+        "--author",
+        action="append",
+        default=[],
+        help='accept: an author, "Surname, Given" (repeat for more)',
+    )
+    review.add_argument("--year", type=int, help="accept: publication year")
     review.set_defaults(func=cmd_review)
 
     convert = sub.add_parser(

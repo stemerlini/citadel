@@ -601,6 +601,7 @@ class Citadel(App):
                 "accept": "filing",
                 "reject": "rejecting",
                 "retry": "retrying",
+                "edit": "correcting",
             }[action]
             filed: list[str] = []
             failures = 0
@@ -615,6 +616,9 @@ class Citadel(App):
                             results = [ingester.accept(target, **kwargs)]
                         elif action == "retry":
                             results = ingester.retry(target)
+                        elif action == "edit":
+                            ingester.edit_review(target, **kwargs)
+                            results = []
                         else:
                             results = [ingester.reject(target)]
                     except (LookupError, ValueError, OSError, SourceError) as error:

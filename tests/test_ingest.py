@@ -365,3 +365,31 @@ def test_same_title_year_author_is_flagged_on_arrival(setup):
     [result] = ingester.process_inbox()
     assert result.status == "review"
     assert result.reason == "same title, year and author as settles2017review"
+
+
+def test_metadata_can_be_corrected_before_filing(setup):
+    ingester, library, index, state = setup
+    state["confidence"] = 0.4
+    drop(library, "slides.pdf", b"%PDF slides")
+    ingester.process_inbox()
+    proposal = ingester.edit_review(
+        "slides.pdf",
+        title="Detector physics: from particle interactions to tracking concepts",
+        authors=["Bindi, Marcello"],
+        year=2021,
+        type="slides",
+    )
+    assert proposal.confidence == 1.0 and proposal.method == "manual"
+    result = ingester.accept("slides.pdf", topic="optics")
+    assert result.citekey == "bindi2021detector"
+    assert result.folder == "optics/2021_DetectorPhysics_Bindi"
+    assert index.get("bindi2021detector")["type"] == "slides"
+
+
+def test_unknown_fields_are_refused(setup):
+    ingester, library, _, state = setup
+    state["confidence"] = 0.4
+    drop(library)
+    ingester.process_inbox()
+    with pytest.raises(ValueError, match="cannot edit"):
+        ingester.edit_review("paper.pdf", citekey="x")

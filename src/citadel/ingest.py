@@ -665,6 +665,26 @@ class Ingester:
             self.index.reindex()
         return results
 
+    def edit_review(self, name: str, **changes) -> Proposal:
+        """Correct a review item's metadata before it is filed (its file name and
+        citekey are made from it, and never change afterwards). Hand-checked
+        metadata counts as certain."""
+        proposal = self.find_review(name)
+        known = set(Metadata.__dataclass_fields__)
+        unknown = set(changes) - known
+        if unknown:
+            raise ValueError(f"cannot edit {', '.join(sorted(unknown))}")
+        base = proposal.metadata or {"title": Path(proposal.file).stem}
+        meta = Metadata(**{k: v for k, v in base.items() if k in known})
+        for key, value in changes.items():
+            setattr(meta, key, value)
+        meta.source = "manual"
+        proposal.metadata = asdict(meta)
+        proposal.confidence, proposal.method = 1.0, "manual"
+        proposal.reason = "metadata corrected by hand"
+        proposal.save(self.library.review)
+        return proposal
+
     def reject(self, name: str) -> Result:
         """Not a reference to keep: an exact duplicate is deleted, anything else goes to
         _attachments/ (it might still be useful)."""
