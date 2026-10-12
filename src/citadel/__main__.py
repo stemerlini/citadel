@@ -358,6 +358,7 @@ def converted_line(result) -> str:
 def cmd_watch(args: argparse.Namespace) -> int:
     import time
 
+    stop_on_sigterm()
     from .cite import export_bib
     from .classify import Classifier
     from .convert import Converter, ConvertError
@@ -409,6 +410,7 @@ def cmd_add(args: argparse.Namespace) -> int:
 
 
 def cmd_convert(args: argparse.Namespace) -> int:
+    stop_on_sigterm()
     from .convert import Converter, ConvertError
 
     session = Session()
@@ -596,6 +598,17 @@ def cmd_review(args: argparse.Namespace) -> int:
         session.close()
     emit(result.as_dict(), args.json, result_line(result))
     return 0
+
+
+def stop_on_sigterm() -> None:
+    """systemctl stop sends SIGTERM: turn it into a normal exit, so `finally` blocks run
+    (the Marker worker and llama-server are stopped, the status file says idle)."""
+    import signal
+
+    def stop(signum, frame):
+        raise SystemExit(0)
+
+    signal.signal(signal.SIGTERM, stop)
 
 
 def main(argv: list[str] | None = None) -> None:
