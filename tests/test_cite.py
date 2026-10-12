@@ -68,3 +68,25 @@ def test_format_ref():
     ref = make_ref()
     assert cite.format_ref(ref, "key") == "verma2004statistical"
     assert cite.format_ref(ref, "bibtex").startswith("@article")
+
+
+def test_export_bib_rewrites_only_on_change(tmp_path):
+    from citadel.index import Index
+    from conftest import file_ref
+
+    root = tmp_path / "lib"
+    file_ref(root, make_ref())
+    file_ref(
+        root,
+        make_ref(citekey="abel2001x", title="Another paper here", topic="optics", doi="10.1/a"),
+    )
+    index = Index(tmp_path / "index.db", root)
+    index.reindex()
+    path, changed, count = cite.export_bib(index)
+    text = path.read_text()
+    assert changed and count == 2 and path == root / "library.bib"
+    assert text.index("@article{abel2001x") < text.index("@article{verma2004statistical")
+    mtime = path.stat().st_mtime_ns
+    _, changed, _ = cite.export_bib(index)
+    assert not changed and path.stat().st_mtime_ns == mtime
+    index.close()

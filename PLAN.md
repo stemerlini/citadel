@@ -3,8 +3,9 @@
 > The maesters' library for an Omarchy scientist: drop a paper in, get it renamed,
 > catalogued, cited, converted to Markdown, and readable by you, Obsidian and agents.
 
-Status: Phase 5 done (2026-10-10): the TUI, citations (`cite`), editing and moving references;
-192 tests. Library at `~/Cloud/Personal-OneDrive/Citadel`.
+Status: Phase 6 done (2026-10-12): MCP server, Claude Code skill, library.bib; 234 tests.
+Library at `~/Cloud/Personal-OneDrive/Citadel` (31 references). Next: migration (Phase 8),
+then Obsidian when the vault exists.
 
 ## Goals
 
@@ -285,6 +286,18 @@ folders), then `omarchy plugin enable smerlini.citadel`.
   queue (approve or fix each decision), `?` help.
 - A theme that follows Omarchy (as in Toploader), an About screen with a logo, a bar
   widget showing the inbox count, an apps-menu entry.
+
+### As built (Phase 6)
+
+- `citadel mcp` (official `mcp` SDK 2.x, `MCPServer`; FastMCP was renamed in 2.0): tools
+  search, get, read, cite, list_references, topics (read-only) and add (writes, open-world).
+  `read` serves the Markdown by section or in ≤12k-character chunks; `get` gives the outline.
+  Server instructions state the conventions for any MCP client.
+- Claude Code skill `omarchy/skill/citadel/SKILL.md`, linked into `~/.claude/skills/citadel`:
+  library first, read from Markdown, web only for gaps (offer `add`), cite `[@citekey]`.
+- `library.bib` in the library root (sorted, rewritten only on change; watcher + `citadel bib`).
+- Verified with a fresh headless Claude Code session: it searched Citadel unprompted, cited
+  `tylka1997creme96`, and asked for conversion instead of guessing a section.
 
 ## Obsidian integration (library stays outside the vault)
 

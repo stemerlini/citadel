@@ -72,6 +72,23 @@ citadel duplicates [keep|ignore CITEKEY-or-file]   # deleted copies go to OneDri
 
 Every command takes `--json`.
 
+## Agents
+
+`tools/install-omarchy` registers Citadel with Claude Code (user scope) and links the
+`citadel` skill into `~/.claude/skills/`, so any agent session can use your library:
+
+| MCP tool | Does |
+|---|---|
+| `search` | full-text search (optionally within a topic) |
+| `get` | metadata, file paths, and an outline of the Markdown full text |
+| `read` | the full text by section (`"2.1"`, `"Results"`) or in chunks (`next_start`) |
+| `cite` | formatted references, BibTeX or citekeys |
+| `list_references`, `topics` | browse the library |
+| `add` | add a PDF, DOI or arXiv id (recorded as `agent:NAME`); the only tool that writes |
+
+Other agents: run `citadel mcp` as a stdio MCP server. `library.bib` in the library root
+holds every reference as BibTeX (kept current by the watcher; `citadel bib` on demand).
+
 ## Development
 
 ```sh

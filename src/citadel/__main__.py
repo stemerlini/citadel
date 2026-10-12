@@ -16,6 +16,8 @@
     citadel convert         convert filed PDFs to Markdown on the GPU (Marker)
     citadel cite KEY…       formatted references, BibTeX entries or citekeys
     citadel duplicates      list duplicates; keep one copy (the rest is deleted)
+    citadel mcp             serve the library to agents (MCP over stdio)
+    citadel bib             write library.bib (all references, BibTeX) in the library
     citadel --version
 
 Every command accepts --json, for agents and scripts.
@@ -356,6 +358,7 @@ def converted_line(result) -> str:
 def cmd_watch(args: argparse.Namespace) -> int:
     import time
 
+    from .cite import export_bib
     from .classify import Classifier
     from .convert import Converter, ConvertError
 
@@ -375,6 +378,10 @@ def cmd_watch(args: argparse.Namespace) -> int:
                 log(result_line(result))
                 if result.status == "filed":
                     filed.append(result.citekey)
+            try:
+                export_bib(session.index)  # rewritten only when something changed
+            except OSError as error:
+                log(f"error   library.bib: {error}")
             if filed and session.config.convert.auto:
                 converter = Converter(session.index, session.config)
                 try:
@@ -513,6 +520,31 @@ def cmd_duplicates(args: argparse.Namespace) -> int:
         args.json,
         f"Kept {keep_id}; deleted (to OneDrive's recycle bin): " + ", ".join(deleted),
     )
+    return 0
+
+
+def cmd_bib(args: argparse.Namespace) -> int:
+    from .cite import export_bib
+
+    index = open_index()
+    try:
+        path, changed, count = export_bib(
+            index, Path(args.output).expanduser() if args.output else None
+        )
+    finally:
+        index.close()
+    emit(
+        {"path": str(path), "changed": changed, "entries": count},
+        args.json,
+        f"{path}: {count} entries" + ("" if changed else " (already up to date)"),
+    )
+    return 0
+
+
+def cmd_mcp(args: argparse.Namespace) -> int:
+    from .mcp_server import main as serve
+
+    serve()
     return 0
 
 
@@ -671,6 +703,14 @@ def main(argv: list[str] | None = None) -> None:
     dupes.add_argument("action", nargs="?", default="list", choices=["list", "keep", "ignore"])
     dupes.add_argument("member", nargs="?", help="keep/ignore: a citekey or review file name")
     dupes.set_defaults(func=cmd_duplicates)
+
+    bib = sub.add_parser("bib", parents=[common], help="write library.bib")
+    bib.add_argument("--output", help="somewhere else than <library>/library.bib")
+    bib.set_defaults(func=cmd_bib)
+
+    sub.add_parser("mcp", help="serve the library to agents (MCP, stdio)").set_defaults(
+        func=cmd_mcp, json=False
+    )
 
     args = parser.parse_args(argv)
     if args.command is None:
