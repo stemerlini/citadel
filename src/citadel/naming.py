@@ -86,18 +86,20 @@ def short_title(title: str) -> str:
 
 
 def surname(author: str) -> str:
-    """Surname of an author written "Surname, Given" (or an organisation: "NRL").
+    """Surname of an author written "Surname, Given", or an organisation's name.
 
     "van der Merwe, J." -> "VanDerMerwe", "Schäfer, J." -> "Schafer".
-    Without a comma, the last word is taken ("Mahendra K. Verma" -> "Verma"),
-    unless the whole name is one token or an organisation in capitals.
+    Without a comma, a name with initials is a person ("Mahendra K. Verma" ->
+    "Verma"); anything else is an organisation, kept whole ("Texas Instruments"
+    -> "TexasInstruments", "NRL" -> "NRL").
     """
     author = author.strip()
     if "," in author:
         name = author.split(",", 1)[0]
     else:
         parts = author.split()
-        name = author if len(parts) <= 1 or author.isupper() else parts[-1]
+        person = len(parts) > 1 and any(re.fullmatch(r"[A-Z]\.(-[A-Z]\.)?", p) for p in parts)
+        name = parts[-1] if person else author
     return "".join(pascal(w) for w in words(name)) or "Anon"
 
 

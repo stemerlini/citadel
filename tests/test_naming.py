@@ -53,6 +53,8 @@ def test_subtitle_kept_when_head_is_empty():
         ("Mahendra K. Verma", "Verma"),
         ("NRL", "NRL"),
         ("ECSS", "ECSS"),
+        ("Texas Instruments", "TexasInstruments"),
+        ("Jean-Luc Picard", "JeanLucPicard"),  # no comma, no initials: read as an organisation
         ("Smørgrav, D.", "Smorgrav"),
         ("Ascoli-Bartoli, U.", "AscoliBartoli"),
         ("", "Anon"),

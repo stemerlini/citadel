@@ -38,7 +38,7 @@ BODIES = [
         "ESA Requirements and Standards Division",
     ),
     Body(
-        re.compile(r"\bNASA-(?:STD|HDBK|SPEC|TM|TP)-\d{3,5}[A-Z]?(?:-\d+)?", re.IGNORECASE),
+        re.compile(r"\bNASA-(?:STD|HDBK|SPEC|TM|TP)-\d{3,5}(?:\.\d+)?[A-Z]?(?:-\d+)?", re.IGNORECASE),
         "NASA",
         "NASA",
     ),

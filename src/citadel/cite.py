@@ -36,7 +36,11 @@ FORMATS = ("reference", "bibtex", "key")
 def bibtex(ref: Reference) -> str:
     kind = BIBTEX_TYPES.get(ref.type, "misc")
     fields: list[tuple[str, str]] = [
-        ("author", " and ".join(_escape(a) for a in ref.authors)),
+        # Organisations (no comma) are braced so BibTeX does not split them into names.
+        (
+            "author",
+            " and ".join(_escape(a) if "," in a else "{" + _escape(a) + "}" for a in ref.authors),
+        ),
         # Double braces keep capitals (MHD, Kelvin-Helmholtz) as written.
         ("title", "{" + _escape(ref.title, keep_math=True) + "}"),
     ]

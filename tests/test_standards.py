@@ -65,3 +65,8 @@ def test_identify_returns_standards_without_searching():
     )
     assert found.method == "standard" and found.confidence == standards.CONFIDENCE
     assert found.metadata.title == "ECSS-E-ST-10-04C Rev.1: Space environment"
+
+
+def test_dotted_nasa_numbers():
+    found = standards.recognise(pdf("NASA-HDBK-8739.21\n2010\nWorkmanship manual\n"))
+    assert found.title.startswith("NASA-HDBK-8739.21")
