@@ -485,6 +485,8 @@ class ReviewScreen(ModalScreen[None]):
             return
         meta = item.metadata or {}
         lines = [f"[b $warning]{escape(item.reason)}[/]", ""]
+        if item.original_name and item.original_name != item.file:
+            lines[1:1] = [f"[dim]arrived as {escape(item.original_name)}[/]"]
         if meta:
             lines += [
                 f"[b]{escape(meta.get('title', ''))}[/]",

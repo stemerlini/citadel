@@ -155,8 +155,8 @@ description = "Radiation effects on electronics and materials, radiation testing
 keywords = ["radiation effects", "radiation testing", "radiation hardness", "radiation hardness assurance", "radiation-hardened", "rad-hard", "total ionising dose", "total ionizing dose", "TID", "single event effects", "single-event effects", "single event upset", "SEE", "SEU", "SEL", "latch-up", "displacement damage", "NIEL", "heavy ion", "proton testing", "laser testing", "internal charging", "spacecraft charging", "dielectric charging", "dose rate", "ELDRS", "radiation-induced", "irradiation"]
 
 ["space-engineering/instruments"]
-description = "Space-borne instruments, mainly radiation and particle monitors and spectrometers: design and calibration."
-keywords = ["radiation monitor", "particle detector", "energetic particle detector", "particle spectrometer", "X-ray spectrometer", "space instrument", "in-flight calibration", "instrument calibration", "RADEM", "RADMON", "SREM", "payload", "onboard"]
+description = "Space instruments and particle detectors: radiation monitors, particle telescopes and spectrometers, ion identification, detector design, simulation and calibration."
+keywords = ["radiation monitor", "particle detector", "particle detectors", "energetic particle detector", "particle telescope", "particle spectrometer", "X-ray spectrometer", "space instrument", "in situ", "in-flight calibration", "instrument calibration", "ion identification", "energy measurement", "time-of-flight", "solid state detector", "silicon detector", "diamond detector", "silicon sensor", "detector simulation", "low-gain avalanche", "LGAD", "scintillator", "Cherenkov", "RADEM", "RADMON", "SREM", "payload", "onboard", "on-board"]
 
 ["space-engineering/product-assurance"]
 description = "Product assurance: reliability, dependability, safety, EEE components and quality standards."

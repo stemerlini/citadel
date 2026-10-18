@@ -135,3 +135,47 @@ def test_author_in_text_tolerates_affiliation_marks():
     assert identify.author_in_text("Schäfer, J.", "J. Schafer*")
     assert not identify.author_in_text("Settle, G.", "Gary S Settles")
     assert identify.author_in_text("van der Merwe, J.", "J. van der Merwe")
+    assert identify.author_in_text("Gautier, F.", "F. Gautiera , A. Greeleyb ,")
+    assert not identify.author_in_text("Hall, G.", "R. Halls and others")
+
+
+def test_an_identifier_in_the_paper_with_its_exact_title_is_trusted(monkeypatch):
+
+    paper = Metadata(
+        title="A novel technique for real-time ion identification",
+        authors=["Gautier, F."],
+        year=2021,
+        doi="10.1016/j.nima.2021.165599",
+    )
+    patch_sources(monkeypatch, crossref={paper.doi: paper})
+    text = (
+        "doi 10.1016/j.nima.2021.165599\nA novel technique for real-time ion "
+        "identification\nThe Collaboration\n"
+    )
+    found = identify.identify_text(
+        page(first_pages=text, title_candidates=[paper.title]), FakeHttp()
+    )
+    assert found.confidence >= identify.DIRECT_MATCH  # no author or year on the page
+
+
+def test_arxiv_id_in_the_file_name_is_used(monkeypatch):
+    from pathlib import Path
+
+    preprint = Metadata(
+        title="Some preprint about detectors",
+        authors=["Gautier, F."],
+        year=2021,
+        arxiv="2103.00613",
+    )
+    seen = []
+    patch_sources(monkeypatch, arxiv=preprint)
+    from citadel import sources
+
+    monkeypatch.setattr(sources, "arxiv", lambda http, a: seen.append(a) or preprint)
+    pdf = page(
+        first_pages="Some preprint about detectors\nF. Gautiera , A. Greeleyb ,\n2021",
+        title_candidates=[preprint.title],
+        path=Path("/x/2103.00613v2.pdf"),
+    )
+    found = identify.identify_text(pdf, FakeHttp())
+    assert seen == ["2103.00613"] and found.method == "arxiv" and found.confidence >= 0.9

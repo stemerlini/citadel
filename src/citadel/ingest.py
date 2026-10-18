@@ -64,6 +64,7 @@ class Proposal:
     original_path: str = ""
     added: str = ""
     source: str = "inbox"  # kept for the reference when the item is accepted
+    original_name: str = ""  # the file's name when it arrived (main.pdf, 2103.00613.pdf…)
 
     def save(self, folder: Path) -> None:
         (folder / f"{self.file}{PROPOSAL_SUFFIX}").write_text(json.dumps(asdict(self), indent=2))
@@ -540,7 +541,8 @@ class Ingester:
             return result
         review = self.library.review
         review.mkdir(exist_ok=True)
-        name = _free_name(review, path.name)
+        name = _free_name(review, review_name(proposal, path.name))
+        proposal.original_name = proposal.original_name or path.name
         proposal.file = name
         proposal.original_path = str(path)
         proposal.added = dt.date.today().isoformat()
@@ -564,10 +566,13 @@ class Ingester:
         return items
 
     def find_review(self, name: str) -> Proposal:
-        """A review item by file name or unique prefix."""
+        """A review item by its file name or the name it arrived with (main.pdf), whole
+        or a unique prefix."""
         items = self.review_items()
-        exact = [p for p in items if p.file == name]
-        matches = exact or [p for p in items if p.file.startswith(name)]
+        exact = [p for p in items if name in (p.file, p.original_name)]
+        matches = exact or [
+            p for p in items if p.file.startswith(name) or (p.original_name or "").startswith(name)
+        ]
         if len(matches) != 1:
             raise LookupError(f"{len(matches)} review items match {name!r}")
         return matches[0]
@@ -653,12 +658,20 @@ class Ingester:
             _verified_copy(path, working, proposal.sha256)
             path.unlink()
             sidecar.unlink(missing_ok=True)
-            result = self.ingest(working, source=proposal.source)
+            # Metadata corrected by hand is kept; only the topic is worked out again.
+            known = (
+                Metadata(**proposal.metadata)
+                if proposal.method == "manual" and proposal.metadata
+                else None
+            )
+            result = self.ingest(working, source=proposal.source, known=known)
             if result.status == "error":  # put it back as it was
                 _verified_copy(working, path, proposal.sha256)
                 proposal.save(self.library.review)
                 working.unlink()
-            result.file = proposal.file
+            elif result.status == "review":
+                self._keep_original_name(result, proposal.original_name or proposal.file)
+            result.file = proposal.original_name or proposal.file
             filed = filed or result.status == "filed"
             results.append(result)
         if filed:
@@ -682,8 +695,29 @@ class Ingester:
         proposal.metadata = asdict(meta)
         proposal.confidence, proposal.method = 1.0, "manual"
         proposal.reason = "metadata corrected by hand"
-        proposal.save(self.library.review)
+        return self._rename_review(proposal)
+
+    def _rename_review(self, proposal: Proposal) -> Proposal:
+        """Give a review item the name its (new) metadata implies, and save it."""
+        review = self.library.review
+        old = proposal.file
+        wanted = review_name(proposal, old)
+        if wanted != old:
+            new = _free_name(review, wanted)
+            (review / old).rename(review / new)
+            (review / f"{old}{PROPOSAL_SUFFIX}").unlink(missing_ok=True)
+            proposal.original_name = proposal.original_name or old
+            proposal.file = new
+        proposal.save(review)
         return proposal
+
+    def _keep_original_name(self, result: Result, original: str) -> None:
+        name = result.folder.rsplit("/", 1)[-1]
+        sidecar = self.library.review / f"{name}{PROPOSAL_SUFFIX}"
+        if sidecar.exists():
+            proposal = Proposal.load(sidecar)
+            proposal.original_name = original
+            proposal.save(self.library.review)
 
     def reject(self, name: str) -> Result:
         """Not a reference to keep: an exact duplicate is deleted, anything else goes to
@@ -697,7 +731,8 @@ class Ingester:
             return Result(str(path), "deleted", f"exact duplicate of {proposal.duplicate_of}")
         attachments = self.library.attachments
         attachments.mkdir(exist_ok=True)
-        target = attachments / _free_name(attachments, proposal.file)
+        # Not a reference: it goes back to the name it arrived with.
+        target = attachments / _free_name(attachments, proposal.original_name or proposal.file)
         _verified_copy(path, target, proposal.sha256)
         path.unlink()
         sidecar.unlink(missing_ok=True)
@@ -759,3 +794,15 @@ def title_key(title: str, year, author: str) -> str | None:
     if len(words) < 3 or not author:
         return None
     return f"{' '.join(words)}|{year or ''}|{author.lower()}"
+
+
+def review_name(proposal: Proposal, fallback: str) -> str:
+    """A review item's file name: what it will be called once filed, when its metadata
+    is known (2015_Weightfield2FastSimulatorSiliconDiamond_Cenna.pdf), else its own."""
+    meta = proposal.metadata or {}
+    if not meta.get("title"):
+        return fallback
+    return (
+        naming.basename(meta.get("year"), meta["title"], meta.get("authors") or [])
+        + Path(fallback).suffix.lower()
+    )

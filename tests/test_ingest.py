@@ -14,6 +14,9 @@ from citadel.library import Library
 from citadel.pdf import PdfText
 from citadel.sources import Metadata
 
+# What a review item holding GOOD is called: its name once filed.
+REVIEW_NAME = "2017_ReviewRecentDevelopmentsSchlierenShadowgraph_Settles"
+
 GOOD = Metadata(
     title="A review of recent developments in schlieren and shadowgraph techniques",
     authors=["Settles, Gary S"],
@@ -81,10 +84,13 @@ def test_low_confidence_goes_to_review_with_a_proposal(setup):
     drop(library)
     [result] = ingester.process_inbox()
     assert result.status == "review" and "metadata confidence 0.50" in result.reason
-    proposal = json.loads((library.review / f"paper.pdf{PROPOSAL_SUFFIX}").read_text())
+    proposal = json.loads((library.review / f"{REVIEW_NAME}.pdf{PROPOSAL_SUFFIX}").read_text())
+    assert proposal["original_name"] == "paper.pdf"  # named after its metadata
     assert proposal["metadata"]["doi"] == GOOD.doi
     assert proposal["topic"] == "plasma-physics/diagnostics/refractive"
-    assert (library.review / "paper.pdf").exists() and not (library.inbox / "paper.pdf").exists()
+    assert (library.review / f"{REVIEW_NAME}.pdf").exists() and not (
+        library.inbox / "paper.pdf"
+    ).exists()
 
 
 def test_accept_and_reject(setup):
@@ -235,11 +241,12 @@ def test_office_documents_in_review_show_the_original(setup, monkeypatch):
     [result] = ingester.process_inbox()
     assert result.status == "review"
     [item] = ingester.review_items()
-    assert item.file == "report.docx" and (library.review / "report.docx").exists()
-    accepted = ingester.accept("report.docx")
+    assert item.original_name == "report.docx" and item.file == f"{REVIEW_NAME}.docx"
+    assert (library.review / item.file).exists()
+    accepted = ingester.accept("report.docx")  # the name it arrived with still works
     folder = library.root / accepted.folder
     assert (folder / f"{folder.name}.docx").exists() and (folder / f"{folder.name}.pdf").exists()
-    assert not (library.review / "report.docx").exists()
+    assert not any(library.review.iterdir())
 
 
 def test_annexes_are_attached_to_their_standard(setup, monkeypatch):
@@ -316,7 +323,8 @@ def test_retry_that_still_fails_stays_in_review(setup):
     [result] = ingester.retry()
     assert result.status == "review"
     [item] = ingester.review_items()
-    assert item.file == "paper.pdf"  # same name, not "paper (2).pdf"
+    assert item.file == f"{REVIEW_NAME}.pdf"  # the same name again, not "… (2).pdf"
+    assert item.original_name == "paper.pdf"
 
 
 def test_retry_puts_the_file_back_on_error(setup, monkeypatch):
@@ -324,7 +332,7 @@ def test_retry_puts_the_file_back_on_error(setup, monkeypatch):
     state["confidence"] = 0.5
     drop(library)
     ingester.process_inbox()
-    before = (library.review / "paper.pdf").read_bytes()
+    before = (library.review / f"{REVIEW_NAME}.pdf").read_bytes()
 
     def broken(path, **kwargs):
         from citadel.ingest import Result
@@ -334,7 +342,7 @@ def test_retry_puts_the_file_back_on_error(setup, monkeypatch):
     monkeypatch.setattr(ingester, "ingest", broken)
     [result] = ingester.retry()
     assert result.status == "error"
-    assert (library.review / "paper.pdf").read_bytes() == before
+    assert (library.review / f"{REVIEW_NAME}.pdf").read_bytes() == before
     assert len(ingester.review_items()) == 1
 
 
@@ -393,3 +401,37 @@ def test_unknown_fields_are_refused(setup):
     ingester.process_inbox()
     with pytest.raises(ValueError, match="cannot edit"):
         ingester.edit_review("paper.pdf", citekey="x")
+
+
+def test_editing_a_review_item_renames_it(setup):
+    ingester, library, _, state = setup
+    state["confidence"] = 0.4
+    drop(library, "main.pdf", b"%PDF main")
+    ingester.process_inbox()
+    proposal = ingester.edit_review(
+        "main.pdf",
+        title="Weightfield2: a fast simulator for silicon and diamond solid state detector",
+        authors=["Cenna, Francesca"],
+        year=2015,
+    )
+    assert proposal.file == "2015_Weightfield2FastSimulatorSiliconDiamondSolid_Cenna.pdf"
+    assert proposal.original_name == "main.pdf"
+    assert sorted(p.name for p in library.review.iterdir()) == [
+        proposal.file,
+        proposal.file + PROPOSAL_SUFFIX,
+    ]
+
+
+def test_retry_keeps_metadata_corrected_by_hand(setup):
+    ingester, library, index, state = setup
+    state["confidence"] = 0.4
+    drop(library, "main.pdf", b"%PDF main")
+    ingester.process_inbox()
+    ingester.edit_review(
+        "main.pdf", title="The right title of this paper", year=2015, authors=["Cenna, Francesca"]
+    )
+    state["meta"] = Metadata(title="A wrong match", authors=["Other, A."], year=1999)
+    [result] = ingester.retry()
+    assert result.file == "main.pdf" and result.status == "filed"
+    assert result.title == "The right title of this paper"  # not the wrong match
+    assert index.get(result.citekey)["year"] == 2015

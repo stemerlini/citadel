@@ -26,6 +26,11 @@ from citadel import naming
             "MonoenergeticProtonBacklighterMeasuringEB",
         ),
         ("The", "The"),
+        (
+            "Weightfield2: a fast simulator for silicon and diamond solid state detector",
+            "Weightfield2FastSimulatorSiliconDiamondSolid",
+        ),
+        ("AGILE: Development of a compact, low-power detector", "AGILEDevelopmentCompactLowPowerDetector"),
         ("", "Untitled"),
     ],
 )

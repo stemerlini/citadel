@@ -32,6 +32,8 @@ from .sources import Http, Metadata, SourceError
 
 MAX_DOIS = 3  # DOIs on the first pages beyond the first few are almost always citations
 GOOD_ENOUGH = 0.9  # stop searching once a candidate scores this
+TRUSTED_TITLE = 0.95  # title match that makes a DOI/arXiv id found in the paper certain
+DIRECT_MATCH = 0.92  # …the confidence it then gets
 PLAUSIBLE = 0.5  # below this after the best title guess, try the other guesses
 AMBIGUITY_MARGIN = 0.05  # a different work this close to the best makes it ambiguous
 AMBIGUOUS_CAP = 0.75  # confidence of an ambiguous result (below the review threshold)
@@ -88,8 +90,12 @@ class _Search:
     def consider(self, candidate: Metadata | None, method: str, weight: float) -> None:
         if candidate is None or not candidate.title:
             return
-        score, notes = check(candidate, self.pdf, copyright_page=method == "isbn")
+        score, notes, title_score = check(candidate, self.pdf, copyright_page=method == "isbn")
         confidence = weight * score
+        if method in ("doi", "arxiv") and title_score >= TRUSTED_TITLE:
+            # An identifier printed in the paper, and the record's title on its page:
+            # authors set in an unusual way must not hold this back.
+            confidence = max(confidence, DIRECT_MATCH)
         key = candidate.doi or candidate.arxiv or candidate.isbn or "-"
         self.evidence.append(
             f"{method} {key}: '{candidate.title[:70]}' ({notes}) -> {confidence:.2f}"
@@ -137,7 +143,10 @@ def identify_text(pdf: PdfText, http: Http) -> Identification:
         if search.done:
             return search.result()
 
-    for arxiv_id in identifiers.find_arxiv(f"{meta_text}\n{text}")[:2]:
+    # The file name counts too: arXiv downloads are named after their id (2103.00613.pdf).
+    name = pdf.path.stem if pdf.path else ""
+    named = [m.group(1) for m in re.finditer(r"(?<!\d)(\d{4}\.\d{4,5})(?:v\d+)?(?!\d)", name)]
+    for arxiv_id in list(dict.fromkeys(identifiers.find_arxiv(f"{meta_text}\n{text}") + named))[:2]:
         found = search.fetch(f"arxiv {arxiv_id}", lambda a=arxiv_id: sources.arxiv(http, a))
         if found and found.doi:  # the published version has richer metadata
             published = search.fetch(
@@ -248,15 +257,23 @@ def same_work(a: Metadata, b: Metadata) -> bool:
 
 
 def author_in_text(author: str, text: str) -> bool:
-    """The surname on the page, even with affiliation marks glued to it (Settles1,3)."""
+    """The surname on the page, even with affiliation marks glued to it: digits
+    (Settles1,3) or one or two early letters before a separator (Gautiera , Greeleyb ,).
+    Only a-h: affiliation marks, not a longer name (Settle must not match Settles)."""
     surname = naming.ascii_fold(author.split(",")[0]).lower().strip()
     if not surname:
         return False
-    pattern = r"(?<![a-z])" + r"[\s-]*".join(map(re.escape, surname.split())) + r"(?![a-z])"
+    pattern = (
+        r"(?<![a-z])"
+        + r"[\s-]*".join(map(re.escape, surname.split()))
+        + r"(?:[a-h]{1,2}(?=[\s,;*†‡∗\d])|(?![a-z]))"
+    )
     return re.search(pattern, naming.ascii_fold(text).lower()) is not None
 
 
-def check(candidate: Metadata, pdf: PdfText, copyright_page: bool = False) -> tuple[float, str]:
+def check(
+    candidate: Metadata, pdf: PdfText, copyright_page: bool = False
+) -> tuple[float, str, float]:
     """How well a candidate matches the PDF, 0..1, with a short explanation.
 
     Title (65%): the candidate's title on the page as phrases, or its similarity to
@@ -270,7 +287,7 @@ def check(candidate: Metadata, pdf: PdfText, copyright_page: bool = False) -> tu
     text = pdf.all_text
     if not pdf.has_text:
         # Nothing to compare with: trust a direct identifier only moderately.
-        return 0.6, "no text to verify"
+        return 0.6, "no text to verify", 0.0
     later = pdf.later_pages if copyright_page else ""
     text += "\n" + later
     title_score = title_in_text(candidate.title, text)
@@ -293,4 +310,4 @@ def check(candidate: Metadata, pdf: PdfText, copyright_page: bool = False) -> tu
         f"title {title_score:.2f}, author {'yes' if author_ok else 'no'}, "
         f"year {'yes' if year_ok else 'no'}"
     )
-    return score, notes
+    return score, notes, title_score

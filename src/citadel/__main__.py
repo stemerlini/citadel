@@ -586,9 +586,10 @@ def cmd_review(args: argparse.Namespace) -> int:
                     )
                     if v
                 }
-                if corrections:
-                    ingester.edit_review(args.item, **corrections)
-                result = ingester.accept(args.item, topic=args.topic, doi=args.doi, type=args.type)
+                item = args.item
+                if corrections:  # the item is renamed after its corrected metadata
+                    item = ingester.edit_review(args.item, **corrections).file
+                result = ingester.accept(item, topic=args.topic, doi=args.doi, type=args.type)
             else:
                 result = ingester.reject(args.item)
         except (LookupError, ValueError) as error:

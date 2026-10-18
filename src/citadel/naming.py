@@ -69,9 +69,11 @@ def pascal(word: str) -> str:
 
 
 def main_title(title: str) -> str:
-    """The title without its subtitle (text after ':' or ' - '), if anything is left."""
+    """The title without its subtitle (text after ':' or ' - '), unless that leaves a
+    single word."""
     head = re.split(r":|\s[-–—]\s", title, maxsplit=1)[0].strip()
-    return head if words(head) else title
+    # A one-word head is a name (Weightfield2, AGILE, CREME96): the subtitle says what it is.
+    return head if len([w for w in words(head) if w.lower() not in STOP_WORDS]) > 1 else title
 
 
 def short_title(title: str) -> str:
