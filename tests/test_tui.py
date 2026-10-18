@@ -318,3 +318,27 @@ async def test_reference_tree_explore_back_and_add(make_app, monkeypatch):
         await pilot.press("tab")
         await pilot.pause(0.3)
         assert screen.direction == "cited_by" and [x.id for x in screen.works] == ["W4"]
+
+
+async def test_type_views(make_app, tmp_path):
+    from conftest import file_ref, make_ref
+
+    app, _ = make_app()
+    file_ref(
+        app.library.root,
+        make_ref(
+            citekey="minafra2018tests",
+            title="Tests of Ultra Fast Silicon Detectors",
+            type="slides",
+            topic="space-engineering/instruments",
+            doi="",
+        ),
+    )
+    async with app.run_test(size=(140, 40)) as pilot:
+        await pilot.pause()
+        views = [n.data for n in app.query_one("#topics").root.children if n.data]
+        assert ("type", "slides") in views and ("type", "book") not in views  # none yet
+        app.view = ("type", "slides")
+        app.refresh_table()
+        assert [r["citekey"] for r in app.rows] == ["minafra2018tests"]
+        assert "SLIDES & TALKS" in str(app.query_one("#list-title").render())

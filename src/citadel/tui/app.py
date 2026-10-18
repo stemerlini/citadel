@@ -43,6 +43,14 @@ VIEWS = [
     ("reading", "Reading"),
     ("no-md", "Without Markdown"),
 ]
+# By kind of document: these stay filed under their topic, and are gathered here.
+TYPE_VIEWS = [
+    ("slides", "Slides & talks"),
+    ("poster", "Posters"),
+    ("book", "Books"),
+    ("standard", "Standards"),
+    ("report", "Reports"),
+]
 STATUS_MARKS = {"unread": ("●", "accent"), "reading": ("◐", "warning"), "read": ("✓", "")}
 # Markdown column: converted, being converted right now, waiting, nothing to convert.
 MD_MARKS = {
@@ -264,6 +272,12 @@ class Citadel(App):
             label = Text(name)
             label.append(f"  {view_counts[key]}", style="dim")
             tree.root.add_leaf(label, data=("view", key))
+        kinds = Counter(r["type"] for r in self.all_rows)
+        for kind, name in TYPE_VIEWS:
+            if kinds[kind]:  # only the kinds the library has
+                label = Text(name)
+                label.append(f"  {kinds[kind]}", style="dim")
+                tree.root.add_leaf(label, data=("type", kind))
         tree.root.add_leaf(Text("─" * 20, style="dim"), data=None)
         nodes = {"": tree.root}
         for topic in sorted(t.path for t in self.library.topics()):
@@ -288,6 +302,8 @@ class Citadel(App):
         rows = self.all_rows
         if kind == "topic":
             rows = [r for r in rows if r["topic"] == key or r["topic"].startswith(key + "/")]
+        elif kind == "type":
+            rows = [r for r in rows if r["type"] == key]
         elif key == "recent":
             rows = sorted(rows, key=lambda r: r["added"], reverse=True)[:30]
         elif key in ("unread", "reading"):
@@ -361,7 +377,7 @@ class Citadel(App):
                 "the converted full text.",
             )
         kind, key = self.view
-        name = key if kind == "topic" else dict(VIEWS)[key]
+        name = key if kind == "topic" else dict(VIEWS + TYPE_VIEWS)[key]
         if not self.all_rows:
             return (
                 name.upper(),

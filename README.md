@@ -52,6 +52,10 @@ citadel          # opens the TUI
 | `f` | citation tree: references / cited by, step in (`Enter`) and back (`←`), `a` add | | |
 | `?` | about | | |
 
+Slides, posters, books, standards and reports stay filed under their topic and are also
+gathered in the sidebar by kind. Slides and posters are recognised from their pages (landscape,
+presentation software, few words) and described from the deck itself.
+
 The **MD** column: `✓` Markdown ready · `⟳` converting now · `·` not converted yet · `—` no PDF.
 
 Office documents (`.docx`, `.odt`, `.pptx`, …) are converted to PDF with LibreOffice and

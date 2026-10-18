@@ -311,6 +311,18 @@ folders), then `omarchy plugin enable smerlini.citadel`.
 - `citadel refs KEY [--cited-by] [--add N…]`, the `references` MCP tool, and the TUI
   explorer (`f`): step into a reference's own references, back with ←, Tab for cited-by.
 
+### Slides and posters (2026-10-18)
+
+- `PdfText.layout`: slides = mostly landscape pages (w/h ≥ 1.2) made by presentation
+  software (PowerPoint, Keynote, Impress, Beamer…) or with < 160 words per page; poster = a
+  single page ≥ 1500 pt. Checked on the whole library: the 4 decks detected, no paper
+  mistaken. `.pptx`/`.odp` arrive through LibreOffice as landscape PDFs.
+- `talks.describe`: never searched for (a search finds related papers: a deck was once
+  proposed as a NIM-A article). Title from the embedded Title or the biggest text on slide 1,
+  author from the embedded Author, year from the creation date; 0.9 when slide 1 confirms
+  title and author, 0.75 title only.
+- TUI sidebar: Slides & talks, Posters, Books, Standards, Reports (shown when present).
+
 ## Obsidian integration (library stays outside the vault)
 
 **The vault is not set up yet.** This section is the target design: the vault path stays

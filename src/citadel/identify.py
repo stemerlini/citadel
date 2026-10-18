@@ -1,7 +1,9 @@
 """Work out what a PDF is: find its metadata and say how sure we are.
 
 Order of attempts, best evidence first:
-  0. Standards and handbooks (ECSS, NASA, MIL, ESCC, JEDEC), by the identifier at
+  0. Slides and posters (talks.py): described from themselves, never searched for, as
+     a search only finds related papers.
+     Standards and handbooks (ECSS, NASA, MIL, ESCC, JEDEC), by the identifier at
      the top of page 1 (see standards.py): they have no DOI and are not in Crossref
   1. DOIs in the PDF metadata, first pages and cover page -> Crossref
   2. arXiv ids -> arXiv (then Crossref, if the preprint has a journal DOI)
@@ -25,7 +27,7 @@ from dataclasses import dataclass, field
 from difflib import SequenceMatcher
 from pathlib import Path
 
-from . import identifiers, naming, sources, standards
+from . import identifiers, naming, sources, standards, talks
 from .pdf import PdfText
 from .pdf import read as read_pdf
 from .sources import Http, Metadata, SourceError
@@ -126,6 +128,9 @@ class _Search:
 
 
 def identify_text(pdf: PdfText, http: Http) -> Identification:
+    if pdf.layout in ("slides", "poster"):
+        meta, confidence, evidence = talks.describe(pdf)
+        return Identification(meta, confidence, pdf.layout, evidence, pdf)
     standard = standards.recognise(pdf)
     if standard:
         return Identification(

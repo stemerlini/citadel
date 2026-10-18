@@ -18,6 +18,14 @@ from pathlib import Path
 from .identifiers import is_junk_title
 
 TIMEOUT = 60  # seconds per external call; a broken PDF must not hang ingest
+SIZE_PAGES = 5  # pages whose size decides the layout
+LANDSCAPE = 1.2  # width/height above which a page is landscape (4:3 is 1.33, 16:9 1.78)
+SLIDE_WORDS = 160  # fewer words per landscape page than this reads as slides
+POSTER_SIDE = 1500  # points (A2 and up): a single page this big is a poster
+PRESENTATION = re.compile(
+    r"powerpoint|keynote|impress|beamer|google slides|prezi|canva", re.IGNORECASE
+)
+PAGE_SIZE = re.compile(r"^Page\s+\d+\s+size$")
 MAX_TITLE_CANDIDATES = 3
 
 # Pages publishers and repositories put in front of the paper itself.
@@ -42,6 +50,26 @@ class PdfText:
     has_text: bool = False  # False for scans without a text layer
     ocr: bool = False  # True when first_pages came from Tesseract
     later_pages: str = ""  # pages 3-8, read only when needed (see more_text)
+    page_sizes: list[tuple[float, float]] = field(default_factory=list)  # first pages, pts
+    words_per_page: float = 0.0  # over the first pages
+
+    @property
+    def layout(self) -> str:
+        """document | slides | poster, from the page geometry and the producing software.
+
+        Slides: landscape pages made by presentation software, or landscape pages with
+        few words. Poster: a single, very large page."""
+        if not self.page_sizes:
+            return "document"
+        width, height = self.page_sizes[0]
+        if self.pages == 1 and max(width, height) >= POSTER_SIDE:
+            return "poster"
+        landscape = sum(w >= LANDSCAPE * h for w, h in self.page_sizes)
+        if landscape * 2 > len(self.page_sizes):
+            software = f"{self.info.get('Creator', '')} {self.info.get('Producer', '')}"
+            if PRESENTATION.search(software) or self.words_per_page < SLIDE_WORDS:
+                return "slides"
+        return "document"
 
     @property
     def title_guess(self) -> str:
@@ -82,7 +110,10 @@ def sha256(path: Path) -> str:
 def read(path: Path, ocr: bool = True) -> PdfText:
     result = PdfText(path=path, info=_pdfinfo(path))
     result.pages = int(result.info.get("Pages", "0") or 0)
+    result.page_sizes = _page_sizes(result.info)
     pages = pdftotext(path, ["-l", "3"]).split("\f")
+    counted = [len(p.split()) for p in pages if p.strip()]
+    result.words_per_page = sum(counted) / len(counted) if counted else 0.0
     has_text = len(re.findall(r"[A-Za-z]{3,}", " ".join(pages))) >= 20
     title_page = 1
     if has_text and pages and COVER_MARKERS.search(pages[0]):
@@ -115,12 +146,24 @@ def _run(args: list[str]) -> str:
 
 
 def _pdfinfo(path: Path) -> dict[str, str]:
+    """pdfinfo's fields, with the sizes of the first pages ("Page    1 size", …)."""
     info = {}
-    for line in _run(["pdfinfo", "-enc", "UTF-8", str(path)]).splitlines():
+    for line in _run(
+        ["pdfinfo", "-enc", "UTF-8", "-f", "1", "-l", str(SIZE_PAGES), str(path)]
+    ).splitlines():
         key, sep, value = line.partition(":")
         if sep:
             info[key.strip()] = value.strip()
     return info
+
+
+def _page_sizes(info: dict[str, str]) -> list[tuple[float, float]]:
+    sizes = []
+    for key, value in info.items():
+        found = re.match(r"([\d.]+) x ([\d.]+) pts", value)
+        if (PAGE_SIZE.match(key) or key == "Page size") and found:
+            sizes.append((float(found.group(1)), float(found.group(2))))
+    return sizes[:SIZE_PAGES] if any(PAGE_SIZE.match(k) for k in info) else sizes[:1]
 
 
 def pdftotext(path: Path, options: list[str]) -> str:
