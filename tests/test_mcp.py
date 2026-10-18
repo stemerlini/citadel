@@ -89,6 +89,7 @@ async def test_get_has_outline_and_files(server):
     ref = await call(server, "get", citekey="verma2004statistical")
     assert ref["title"].startswith("Statistical theory") and ref["doi"]
     assert ref["files"]["pdf"].endswith("_Verma.pdf")
+    assert ref["online"]["publisher"] == "https://doi.org/10.1016/j.physrep.2004.07.007"
     sections = [s["section"] for s in ref["markdown"]["outline"]]
     assert sections == [
         "Abstract",

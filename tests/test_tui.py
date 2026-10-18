@@ -342,3 +342,18 @@ async def test_type_views(make_app, tmp_path):
         app.refresh_table()
         assert [r["citekey"] for r in app.rows] == ["minafra2018tests"]
         assert "SLIDES & TALKS" in str(app.query_one("#list-title").render())
+
+
+async def test_w_and_g_open_the_paper_online(make_app, monkeypatch):
+    from citadel import web
+
+    opened = []
+    monkeypatch.setattr(web, "open_url", lambda url: opened.append(url) or True)
+    app, _ = make_app()
+    async with app.run_test(size=(140, 40)) as pilot:
+        await pilot.pause()
+        await pilot.press("w")  # harding2009observation: a DOI, no PDF
+        assert opened[-1] == "https://doi.org/10.1/x"
+        await pilot.press("g")
+        assert opened[-1].startswith("https://www.google.com/search?q=")
+        assert "No PDF yet" in str(app.query_one("#details").render())

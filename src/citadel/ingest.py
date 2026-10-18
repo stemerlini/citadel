@@ -211,20 +211,22 @@ class Ingester:
         if meta and not dry_run:
             sources.enrich(self.http, meta)
 
-        if meta and meta.doi:
-            existing = self.index.find_doi(meta.doi)
-            if existing:
-                proposal = self._proposal(path, digest, found, f"same DOI as {existing}", pdf)
-                proposal.duplicate_of = existing
-                return review(proposal)
-        if meta:
-            existing = self._same_title(meta)
-            if existing:
-                proposal = self._proposal(
-                    path, digest, found, f"same title, year and author as {existing}", pdf
-                )
-                proposal.duplicate_of = existing
-                return review(proposal)
+        matches = []
+        if meta and meta.doi and (existing := self.index.find_doi(meta.doi)):
+            matches.append((existing, f"same DOI as {existing}"))
+        if meta and not matches and (existing := self._same_title(meta)):
+            matches.append((existing, f"same title, year and author as {existing}"))
+        for existing, reason in matches:
+            if not self.index.get(existing)["has_pdf"]:
+                # The PDF of a reference filed without one (metadata only): fill it in.
+                if found.confidence >= self.config.ingest.review_threshold:
+                    return self._complete(
+                        shown, path, existing, digest, keep_source, dry_run, original
+                    )
+                reason = f"looks like {existing}, which has no PDF yet: accept to attach"
+            proposal = self._proposal(path, digest, found, reason, pdf)
+            proposal.duplicate_of = existing
+            return review(proposal)
 
         if chosen_topic:
             topic, topic_confidence, explain = chosen_topic, 1.0, "chosen"
@@ -279,6 +281,76 @@ class Ingester:
             topic,
             topic_confidence,
         )
+
+    def _complete(
+        self,
+        shown: Path,
+        pdf: Path,
+        citekey: str,
+        digest: str,
+        keep_source: bool,
+        dry_run: bool,
+        original: Path | None = None,
+    ) -> Result:
+        """Give a metadata-only reference its PDF (and the original office file, if any)."""
+        row = self.index.get(citekey)
+        if dry_run:
+            return Result(
+                str(shown),
+                "dry-run",
+                f"would add the PDF to {citekey}",
+                citekey,
+                row["folder"],
+                row["title"],
+            )
+        folder = self.index.root / row["folder"]
+        md = folder / f"{folder.name}.md"
+        _verified_copy(pdf, folder / f"{folder.name}.pdf", digest)
+        if original:
+            _verified_copy(
+                original, folder / f"{folder.name}{original.suffix.lower()}", sha256(original)
+            )
+        ref, _ = record.read(md)
+        ref.pdf_sha256 = digest
+        record.update_metadata(md, ref)
+        self.index.add(md)
+        if not keep_source:
+            shown.unlink(missing_ok=True)
+        return Result(
+            str(shown),
+            "filed",
+            f"PDF added to {citekey}",
+            citekey,
+            row["folder"],
+            row["title"],
+            1.0,
+            row["topic"],
+            1.0,
+        )
+
+    def attach_pdf(self, citekey: str, path: Path, keep_source: bool = True) -> Result:
+        """Add a PDF to a reference that has none, after checking it is that paper (its
+        DOI or title must match, unless the reference has neither)."""
+        row = self.index.get(citekey)
+        if row is None:
+            raise LookupError(f"no reference {citekey}")
+        if row["has_pdf"]:
+            raise ValueError(f"{citekey} already has a PDF")
+        found = identify_text(read_pdf(path), self.http)
+        data = row["data"]
+        same = found.metadata and (
+            (data.get("doi") and found.metadata.doi == data["doi"])
+            or title_key(
+                found.metadata.title,
+                found.metadata.year,
+                naming.surname(found.metadata.authors[0]) if found.metadata.authors else "",
+            )
+            == title_key(row["title"], row["year"], row["first_author"])
+        )
+        if not same:
+            seen = found.metadata.title[:70] if found.metadata else "nothing recognisable"
+            raise ValueError(f"this PDF does not look like {citekey} (it reads as: {seen})")
+        return self._complete(path, path, citekey, sha256(path), keep_source, False)
 
     def _same_title(self, meta: Metadata) -> str | None:
         author = naming.surname(meta.authors[0]) if meta.authors else ""
@@ -618,6 +690,13 @@ class Ingester:
         proposal = self.find_review(name)
         path = self.library.review / proposal.file
         if proposal.duplicate_of and not force:
+            target = self.index.get(proposal.duplicate_of)
+            if target and not target["has_pdf"] and path.suffix.lower() == ".pdf":
+                result = self._complete(
+                    path, path, proposal.duplicate_of, proposal.sha256, False, False
+                )
+                (self.library.review / f"{proposal.file}{PROPOSAL_SUFFIX}").unlink(missing_ok=True)
+                return result
             raise ValueError(
                 f"{proposal.file} duplicates {proposal.duplicate_of}: reject it instead"
             )

@@ -145,3 +145,14 @@ def test_cite(capsys, library_root, config_file, index_file):
     data = json.loads(out)
     assert code == 1 and data["missing"] == ["nobody"]
     assert data["entries"][0]["text"].startswith("Verma, M. K. (2004).")
+
+
+def test_web_prints_the_address(capsys, library_root, config_file, index_file):
+    from conftest import file_ref, make_ref
+
+    run(capsys, "init")
+    file_ref(library_root, make_ref())
+    code, out = run(capsys, "web", "verma2004statistical", "--print")
+    assert code == 0 and out.strip() == "https://doi.org/10.1016/j.physrep.2004.07.007"
+    code, out = run(capsys, "web", "verma2004statistical", "--print", "--google", "--json")
+    assert json.loads(out)["url"].startswith("https://www.google.com/search")

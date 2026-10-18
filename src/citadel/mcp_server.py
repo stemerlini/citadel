@@ -18,7 +18,7 @@ from collections import Counter
 import mcp.types as types
 from mcp.server.mcpserver import MCPServer
 
-from . import __version__, cite, edit, paths, record
+from . import __version__, cite, edit, paths, record, web
 from .config import Config
 from .index import Index
 from .library import Library
@@ -111,6 +111,10 @@ def build_server() -> MCPServer:
                     "attachments",
                 )
                 if data.get(k)
+            },
+            "online": {
+                "publisher": web.publisher_url(data.get("doi", ""), data.get("arxiv", "")) or None,
+                "search": web.search_url(data["title"], data.get("authors"), data.get("year")),
             },
             "files": {
                 "folder": str(folder),

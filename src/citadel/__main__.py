@@ -18,6 +18,8 @@
     citadel duplicates      list duplicates; keep one copy (the rest is deleted)
     citadel mcp             serve the library to agents (MCP over stdio)
     citadel refs KEY        a paper's references (or --cited-by); --add N… fetches them
+    citadel web KEY         open the paper online (publisher page, or --google search)
+    citadel attach KEY PDF  give a reference without a PDF its PDF
     citadel bib             write library.bib (all references, BibTeX) in the library
     citadel --version
 
@@ -611,6 +613,36 @@ def cmd_refs(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_web(args: argparse.Namespace) -> int:
+    from . import web
+
+    index = open_index()
+    row = index.get(args.citekey)
+    index.close()
+    if row is None:
+        emit({"error": f"no reference {args.citekey}"}, args.json, f"No reference {args.citekey}.")
+        return 1
+    url = web.best_url(row["data"], google=args.google)
+    opened = not args.print and web.open_url(url)
+    emit({"url": url, "opened": opened}, args.json, url)
+    return 0
+
+
+def cmd_attach(args: argparse.Namespace) -> int:
+    session = Session()
+    try:
+        result = session.ingester.attach_pdf(
+            args.citekey, Path(args.pdf).expanduser(), keep_source=not args.move
+        )
+    except (LookupError, ValueError, OSError) as error:
+        emit({"error": str(error)}, args.json, f"Error: {error}")
+        return 1
+    finally:
+        session.close()
+    emit(result.as_dict(), args.json, result_line(result))
+    return 0
+
+
 def cmd_mcp(args: argparse.Namespace) -> int:
     from .mcp_server import main as serve
 
@@ -805,6 +837,18 @@ def main(argv: list[str] | None = None) -> None:
     refs.add_argument("--topic", default="", help="--add: topic folder for them")
     refs.add_argument("--limit", type=int, default=50, help="--cited-by: how many")
     refs.set_defaults(func=cmd_refs)
+
+    web_parser = sub.add_parser("web", parents=[common], help="open a reference online")
+    web_parser.add_argument("citekey")
+    web_parser.add_argument("--google", action="store_true", help="a Google search instead")
+    web_parser.add_argument("--print", action="store_true", help="only print the address")
+    web_parser.set_defaults(func=cmd_web)
+
+    attach = sub.add_parser("attach", parents=[common], help="add a reference's PDF")
+    attach.add_argument("citekey")
+    attach.add_argument("pdf")
+    attach.add_argument("--move", action="store_true", help="move the PDF instead of copying")
+    attach.set_defaults(func=cmd_attach)
 
     sub.add_parser("mcp", help="serve the library to agents (MCP, stdio)").set_defaults(
         func=cmd_mcp, json=False

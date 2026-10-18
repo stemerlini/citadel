@@ -44,6 +44,7 @@ class ReferencesScreen(ModalScreen[None]):
         Binding("a", "add", "Add"),
         Binding("v", "mark", "Mark"),
         Binding("o", "open_doi", "Open DOI"),
+        Binding("g", "google", "Google"),
     ]
 
     def __init__(self, citekey: str, topic: str, tones: dict[str, str]) -> None:
@@ -66,7 +67,7 @@ class ReferencesScreen(ModalScreen[None]):
             yield Static(
                 "[dim][b]Enter[/] step into · [b]←[/] back · [b]Tab[/] references ⇄ "
                 "cited by · [b]a[/] add (marked or highlighted) · [b]v[/] mark · "
-                "[b]o[/] open DOI · [b]Esc[/] close\n"
+                "[b]o[/] open DOI · [b]g[/] Google · [b]Esc[/] close\n"
                 "✓ in your library · ⬇ open-access PDF · · metadata only[/]",
                 classes="footnote",
             )
@@ -245,6 +246,13 @@ class ReferencesScreen(ModalScreen[None]):
                 stderr=subprocess.DEVNULL,
                 start_new_session=True,
             )
+
+    def action_google(self) -> None:
+        from .. import web
+
+        w = self.current
+        if w:
+            web.open_url(web.search_url(w.meta.title, w.meta.authors, w.meta.year))
 
     def refresh_marks(self) -> None:
         """After adding: the fetched works now show as in the library."""

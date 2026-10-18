@@ -129,6 +129,8 @@ class Citadel(App):
         Binding("a", "add", "Add"),
         Binding("i", "review", "Review"),
         Binding("f", "references", "References"),
+        Binding("w", "web(False)", "Web", show=False),
+        Binding("g", "web(True)", "Google", show=False),
         Binding("D", "duplicates", "Duplicates", show=False),
         Binding("tab", "focus_next", "Switch pane", show=False),
         Binding("question_mark", "about", "About", key_display="?"),
@@ -423,6 +425,12 @@ class Citadel(App):
             text.append_text(highlight(snippet, f"bold {self.tones['accent']}"))
         elif data.get("abstract"):
             text.append("\n" + clip(data["abstract"], 400), style="dim")
+        if not row["has_pdf"]:
+            text.append(
+                "\nNo PDF yet: w publisher page · g Google · then drop the PDF in "
+                "the inbox, it is attached here",
+                style=f"bold {self.tones['warning']}",
+            )
         text.append("\n" + row["citekey"], style="dim")
         for tag in data.get("tags") or []:
             text.append("  ")
@@ -482,6 +490,7 @@ class Citadel(App):
             "move",
             "convert",
             "references",
+            "web",
         }
         if action in needs_row and self.current_key() is None:
             return False
@@ -719,6 +728,20 @@ class Citadel(App):
         self.reload()
         if isinstance(self.screen, DuplicatesScreen):
             self.screen.refresh_groups(self.duplicate_groups)
+
+    def action_web(self, google: bool) -> None:
+        """The paper online: publisher page (w) or a Google search (g)."""
+        from .. import web
+
+        data = self.index.get(self.current_key())["data"]
+        url = web.best_url(data, google=google)
+        web.open_url(url)
+        hint = (
+            "Download it into the inbox: Citadel attaches it here."
+            if not self.current_row()["has_pdf"]
+            else ""
+        )
+        self.notify(f"Opened {url}\n{hint}".strip(), timeout=6)
 
     def action_references(self) -> None:
         from .references import ReferencesScreen

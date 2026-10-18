@@ -475,3 +475,44 @@ def test_fetch_without_pdf_uses_the_fallback_topic(setup, monkeypatch):
         Work("W3", Metadata(title="Vague words only here", year=2000, authors=["Roe, R."]))
     )
     assert unclear.status == "error" and "topic is unclear" in unclear.reason
+
+
+def test_a_pdf_for_a_reference_without_one_is_attached(setup):
+    ingester, library, index, _ = setup
+    ref = ingester.file_metadata_only(Metadata(**GOOD.__dict__), "optics", "refs:x")
+    folder = library.root / ref.folder
+    assert not (folder / f"{folder.name}.pdf").exists()
+
+    source = drop(library, "downloaded.pdf", b"%PDF from the publisher")
+    [result] = ingester.process_inbox()
+    assert result.status == "filed" and result.reason == f"PDF added to {ref.citekey}"
+    assert (folder / f"{folder.name}.pdf").read_bytes() == b"%PDF from the publisher"
+    assert index.get(ref.citekey)["has_pdf"] == 1 and not source.exists()
+    assert len(index.list()) == 1  # no second reference
+
+
+def test_an_uncertain_match_asks_and_accept_attaches(setup):
+    ingester, library, index, state = setup
+    ref = ingester.file_metadata_only(Metadata(**GOOD.__dict__), "optics", "refs:x")
+    state["confidence"] = 0.6
+    drop(library, "maybe.pdf", b"%PDF maybe")
+    [result] = ingester.process_inbox()
+    assert result.status == "review" and "which has no PDF yet" in result.reason
+    accepted = ingester.accept("maybe.pdf")
+    assert accepted.reason == f"PDF added to {ref.citekey}"
+    assert index.get(ref.citekey)["has_pdf"] == 1 and ingester.review_items() == []
+
+
+def test_attach_checks_it_is_the_same_paper(setup, tmp_path):
+    ingester, library, index, state = setup
+    ref = ingester.file_metadata_only(Metadata(**GOOD.__dict__), "optics", "refs:x")
+    pdf = tmp_path / "x.pdf"
+    pdf.write_bytes(b"%PDF the paper")
+    state["meta"] = Metadata(title="Something else entirely", authors=["Doe, J."], year=2001)
+    with pytest.raises(ValueError, match="does not look like"):
+        ingester.attach_pdf(ref.citekey, pdf)
+    state["meta"] = GOOD
+    result = ingester.attach_pdf(ref.citekey, pdf)
+    assert result.status == "filed" and pdf.exists()  # copied, not moved
+    with pytest.raises(ValueError, match="already has a PDF"):
+        ingester.attach_pdf(ref.citekey, pdf)
