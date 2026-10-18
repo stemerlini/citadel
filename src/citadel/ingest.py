@@ -477,39 +477,71 @@ class Ingester:
         return self._done(self._add_doi(value, topic, source))
 
     def _add_doi(self, doi: str, topic: str, source: str) -> Result:
-        label = f"doi:{doi}"
+        """A DOI: with its open-access PDF when one exists, else metadata only."""
+        from .graph import Graph, Work
+
         meta = sources.crossref(self.http, doi)
         if meta is None:
-            return Result(label, "error", "Crossref does not know this DOI")
-        existing = self.index.find_doi(meta.doi)
+            return Result(f"doi:{doi}", "error", "Crossref does not know this DOI")
+        work = Graph(self.http, self.index).lookup(doi=meta.doi) or Work("", meta)
+        work.meta = meta  # Crossref's record, with OpenAlex's PDF link and ids
+        return self.fetch(work, topic=topic, source=source)
+
+    def fetch(self, work, topic: str = "", fallback_topic: str = "", source: str = "add") -> Result:
+        """Bring a work found in the citation graph (graph.Work) into the library: its
+        open-access PDF when there is one, else a metadata-only reference.
+
+        fallback_topic: where to file it when the topic is unclear, typically the topic
+        of the paper it was found in."""
+        from .graph import Graph
+
+        meta = work.meta
+        label = f"doi:{meta.doi}" if meta.doi else meta.title[:60]
+        existing = (
+            work.citekey
+            or (self.index.find_doi(meta.doi) if meta.doi else "")
+            or self._same_title(meta)
+        )
         if existing:
-            return Result(label, "error", f"already in the library as {existing}")
+            return Result(label, "error", f"already in the library as {existing}", existing)
+        if meta.doi and meta.source != "crossref":
+            richer = sources.crossref(self.http, meta.doi)
+            if richer:
+                richer.arxiv = richer.arxiv or meta.arxiv
+                meta = work.meta = richer
         sources.enrich(self.http, meta)
-        confidence = 1.0
         if not topic:
             found = self.classifier.classify(meta.title, meta.abstract, meta.journal)
-            topic, confidence = found.topic, found.confidence
-            if not topic or confidence < self.config.ingest.topic_threshold:
-                hint = f" (best guess: {topic}, {confidence:.2f})" if topic else ""
-                return Result(
-                    label,
-                    "error",
-                    f"topic unclear{hint}: choose a topic",
-                    title=meta.title,
-                    topic=topic,
-                    topic_confidence=confidence,
-                )
+            if found.topic and found.confidence >= self.config.ingest.topic_threshold:
+                topic = found.topic
+            elif fallback_topic:
+                topic = fallback_topic
+        with tempfile.TemporaryDirectory(prefix="citadel-fetch-", dir=_scratch()) as tmp:
+            pdf = Path(tmp) / f"{naming.basename(meta.year, meta.title, meta.authors)}.pdf"
+            if Graph(self.http, self.index).download(work, pdf):
+                result = self.ingest(pdf, source=source, known=meta, topic=topic)
+                result.file = label
+                return self._done(result)
+        if not topic:
+            return Result(
+                label,
+                "error",
+                "no open-access PDF, and the topic is unclear: choose a topic",
+                title=meta.title,
+            )
         ref = self.file_metadata_only(meta, topic, source)
-        return Result(
-            label,
-            "filed",
-            "metadata only (no PDF)",
-            ref.citekey,
-            ref.folder,
-            ref.title,
-            1.0,
-            topic,
-            confidence,
+        return self._done(
+            Result(
+                label,
+                "filed",
+                "metadata only (no open-access PDF)",
+                ref.citekey,
+                ref.folder,
+                ref.title,
+                1.0,
+                topic,
+                1.0,
+            )
         )
 
     def _done(self, result: Result) -> Result:

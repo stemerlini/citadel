@@ -772,7 +772,8 @@ class AboutScreen(ModalScreen[None]):
                 "[b]c[/] copy reference · [b]b[/] BibTeX · [b]k[/] citekey · "
                 "[b]r[/] read status · [b]e[/] edit · [b]t[/] move to topic · "
                 "[b]m[/] convert to Markdown · [b]a[/] add · [b]i[/] review queue · "
-                "[b]D[/] duplicates\n\n[dim]MD column: [b]✓[/] Markdown ready · [b]⟳[/] "
+                "[b]D[/] duplicates · [b]f[/] references (citation tree)\n\n"
+                "[dim]MD column: [b]✓[/] Markdown ready · [b]⟳[/] "
                 "converting · [b]·[/] not yet · [b]—[/] no PDF[/]",
                 classes="details",
             )

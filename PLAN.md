@@ -299,6 +299,18 @@ folders), then `omarchy plugin enable smerlini.citadel`.
 - Verified with a fresh headless Claude Code session: it searched Citadel unprompted, cited
   `tylka1997creme96`, and asked for conversion instead of guessing a section.
 
+### Citation tree (2026-10-18)
+
+- `graph.py`: OpenAlex for a work's references (in the paper's order) and the works citing
+  it (most cited first); every work is matched against the library (DOI, then title + year
+  + first author). Open-access PDFs from OpenAlex, then Unpaywall (contact email), then
+  arXiv; a downloaded "PDF" that is really a web page is refused.
+- `Ingester.fetch(work)`: open-access PDF → normal ingest with the known metadata; else a
+  metadata-only reference. When the topic is unclear, the topic of the paper it was found
+  in is used. `add doi:…` now goes through the same path (fetches the PDF when free).
+- `citadel refs KEY [--cited-by] [--add N…]`, the `references` MCP tool, and the TUI
+  explorer (`f`): step into a reference's own references, back with ←, Tab for cited-by.
+
 ## Obsidian integration (library stays outside the vault)
 
 **The vault is not set up yet.** This section is the target design: the vault path stays

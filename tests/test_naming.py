@@ -30,7 +30,10 @@ from citadel import naming
             "Weightfield2: a fast simulator for silicon and diamond solid state detector",
             "Weightfield2FastSimulatorSiliconDiamondSolid",
         ),
-        ("AGILE: Development of a compact, low-power detector", "AGILEDevelopmentCompactLowPowerDetector"),
+        (
+            "AGILE: Development of a compact, low-power detector",
+            "AGILEDevelopmentCompactLowPowerDetector",
+        ),
         ("", "Untitled"),
     ],
 )

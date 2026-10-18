@@ -63,7 +63,16 @@ async def call(server, tool, **arguments):
 
 async def test_tools_and_annotations(server):
     tools = {t.name: t for t in await server.list_tools()}
-    assert set(tools) == {"search", "get", "read", "cite", "list_references", "topics", "add"}
+    assert set(tools) == {
+        "search",
+        "get",
+        "read",
+        "cite",
+        "list_references",
+        "topics",
+        "add",
+        "references",
+    }
     assert all(tools[n].annotations.read_only_hint for n in tools if n != "add")
     assert tools["add"].annotations.read_only_hint is False
 

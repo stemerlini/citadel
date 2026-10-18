@@ -219,3 +219,23 @@ ModalScreen {
 #dup-members > .option-list--option {
     margin-bottom: 1;
 }
+
+/* citation tree */
+#refs-screen {
+    width: 94%;
+    height: 92%;
+    background: $surface;
+    border: round $primary;
+    padding: 1 2;
+}
+#refs-table {
+    height: 1fr;
+}
+#refs-loading {
+    height: 1fr;
+}
+#refs-details {
+    height: 7;
+    padding: 1 0 0 0;
+    border-top: solid $primary 20%;
+}

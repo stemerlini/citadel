@@ -49,6 +49,7 @@ citadel          # opens the TUI
 | `e` | edit metadata (`Ctrl+S` saves) | `t` | move to another topic |
 | `m` | convert to Markdown (GPU) | `a` | add a PDF, `doi:…` or `arxiv:…` |
 | `i` | review queue (`a` accept, `t` other topic, `d` DOI, `x` reject, `v` mark, `R` retry) | `D` | duplicates: keep one copy |
+| `f` | citation tree: references / cited by, step in (`Enter`) and back (`←`), `a` add | | |
 | `?` | about | | |
 
 The **MD** column: `✓` Markdown ready · `⟳` converting now · `·` not converted yet · `—` no PDF.
@@ -67,6 +68,7 @@ citadel add arxiv:2101.12345 | doi:10.… | paper.pdf
 citadel convert [CITEKEY…] [--all] [--force] [--ocr]
 citadel search "kelvin helmholtz" ; citadel get CITEKEY
 citadel cite CITEKEY… [--format reference|bibtex|key]
+citadel refs CITEKEY [--cited-by] [--add N…]      # citation tree (OpenAlex); adds fetch open-access PDFs
 citadel duplicates [keep|ignore CITEKEY-or-file]   # deleted copies go to OneDrive's recycle bin
 ```
 
@@ -84,7 +86,8 @@ Every command takes `--json`.
 | `read` | the full text by section (`"2.1"`, `"Results"`) or in chunks (`next_start`) |
 | `cite` | formatted references, BibTeX or citekeys |
 | `list_references`, `topics` | browse the library |
-| `add` | add a PDF, DOI or arXiv id (recorded as `agent:NAME`); the only tool that writes |
+| `references` | the citation tree: what a paper cites or what cites it, with library and open-access marks |
+| `add` | add a PDF, DOI or arXiv id (recorded as `agent:NAME`; a DOI brings its open-access PDF); the only tool that writes |
 
 Other agents: run `citadel mcp` as a stdio MCP server. `library.bib` in the library root
 holds every reference as BibTeX (kept current by the watcher; `citadel bib` on demand).

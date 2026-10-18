@@ -17,6 +17,7 @@
     citadel cite KEY…       formatted references, BibTeX entries or citekeys
     citadel duplicates      list duplicates; keep one copy (the rest is deleted)
     citadel mcp             serve the library to agents (MCP over stdio)
+    citadel refs KEY        a paper's references (or --cited-by); --add N… fetches them
     citadel bib             write library.bib (all references, BibTeX) in the library
     citadel --version
 
@@ -543,6 +544,73 @@ def cmd_bib(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_refs(args: argparse.Namespace) -> int:
+    from .graph import Graph
+
+    session = Session()
+    try:
+        graph = Graph(session.http, session.index)
+        try:
+            work = graph.work_for(args.citekey)
+        except LookupError as error:
+            emit({"error": str(error)}, args.json, f"Error: {error}")
+            return 1
+        if work is None:
+            emit(
+                {"error": "not found in OpenAlex"},
+                args.json,
+                f"OpenAlex does not know {args.citekey}, so its references are unknown.",
+            )
+            return 1
+        works = graph.cited_by(work, args.limit) if args.cited_by else graph.references(work)
+        if args.add:
+            parent = session.index.get(args.citekey)["topic"]
+            results = []
+            for number in args.add:
+                if not 1 <= number <= len(works):
+                    results.append({"number": number, "status": "error", "reason": "no such"})
+                    continue
+                result = session.ingester.fetch(
+                    works[number - 1],
+                    topic=args.topic,
+                    fallback_topic=parent,
+                    source=f"refs:{args.citekey}",
+                )
+                results.append({"number": number, **result.as_dict()})
+            text = "\n".join(
+                f"{r['number']:>3}. {r['status']:<7} {r.get('folder') or r.get('reason')}"
+                for r in results
+            )
+            emit({"results": results}, args.json, text)
+            return 0 if all(r["status"] in ("filed", "review") for r in results) else 1
+    finally:
+        session.close()
+    what = "cited by" if args.cited_by else "references"
+    lines = [
+        f"{work.label}: {work.meta.title[:80]}",
+        f"{len(works)} {what} · ✓ in library · ⬇ open-access PDF · · metadata only",
+        "",
+    ]
+    for number, w in enumerate(works, 1):
+        mark = "✓" if w.citekey else "⬇" if (w.pdf_url or w.meta.arxiv) else "·"
+        lines.append(
+            f"{number:>3}. {mark} {w.label:<22} {w.meta.title[:70]}"
+            + (f"  [{w.citekey}]" if w.citekey else "")
+        )
+    lines.append("")
+    lines.append(
+        f"Add with: citadel refs {args.citekey}"
+        + (" --cited-by" if args.cited_by else "")
+        + " --add N [N…]"
+    )
+    emit(
+        {"paper": work.as_dict(), "direction": what, "works": [w.as_dict() for w in works]},
+        args.json,
+        "\n".join(lines),
+    )
+    return 0
+
+
 def cmd_mcp(args: argparse.Namespace) -> int:
     from .mcp_server import main as serve
 
@@ -721,6 +789,22 @@ def main(argv: list[str] | None = None) -> None:
     bib = sub.add_parser("bib", parents=[common], help="write library.bib")
     bib.add_argument("--output", help="somewhere else than <library>/library.bib")
     bib.set_defaults(func=cmd_bib)
+
+    refs = sub.add_parser(
+        "refs", parents=[common], help="a paper's references or citations; fetch them"
+    )
+    refs.add_argument("citekey")
+    refs.add_argument("--cited-by", action="store_true", help="works citing it instead")
+    refs.add_argument(
+        "--add",
+        type=int,
+        nargs="+",
+        metavar="N",
+        help="add these numbers from the list to the library",
+    )
+    refs.add_argument("--topic", default="", help="--add: topic folder for them")
+    refs.add_argument("--limit", type=int, default=50, help="--cited-by: how many")
+    refs.set_defaults(func=cmd_refs)
 
     sub.add_parser("mcp", help="serve the library to agents (MCP, stdio)").set_defaults(
         func=cmd_mcp, json=False

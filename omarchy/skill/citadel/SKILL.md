@@ -18,9 +18,11 @@ Reach it through the `citadel` MCP tools; the `citadel` CLI is the fallback (bel
    the sections you need (by heading or number), paging with `next_start`. When a reference
    has no Markdown yet, work from its abstract and tell the user `citadel convert` would make
    the full text available.
-3. **Go wider only for gaps.** Search the web for what the library lacks. For each paper
-   worth keeping, offer to `add` it (DOI, arXiv id or a downloaded PDF path) with
-   `agent` set to your name.
+3. **Go wider only for gaps.** Follow the citation tree first: `references` lists what a
+   library paper cites (or, with direction "cited_by", what cites it), marking what the
+   user already has and what has an open-access PDF. Then search the web. For each paper
+   worth keeping, offer to `add` it (DOI, arXiv id or a downloaded PDF path; a DOI brings
+   its open-access PDF when one exists) with `agent` set to your name.
 4. **Cite every claim** that rests on literature with its citekey, Pandoc style:
    `[@tylka1997creme96]`, `[@verma2004statistical, p. 12]`. Done when each such claim
    carries a citekey from Citadel, or a web source the user has been offered to add.
@@ -48,6 +50,7 @@ citadel get CITEKEY --json                  # metadata and file paths
 citadel cite KEY… --format reference|bibtex|key
 citadel list --topic TOPIC --json ; citadel topics --json
 citadel add <pdf | doi:10.… | arxiv:ID> --agent NAME [--topic TOPIC] --json
+citadel refs CITEKEY [--cited-by] --json    # the citation tree; --add N… fetches
 ```
 
 The full text is the record's `.md` file (path from `get`), between

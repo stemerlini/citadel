@@ -221,6 +221,44 @@ def build_server() -> MCPServer:
             ]
         }
 
+    @server.tool(annotations=types.ToolAnnotations(read_only_hint=True, open_world_hint=True))
+    def references(
+        citekey: str = "", doi: str = "", direction: str = "references", limit: int = 50
+    ) -> dict:
+        """The citation graph around a paper (from OpenAlex): direction "references" is
+        what it cites, "cited_by" what cites it (most cited first). Give a library
+        citekey, or a DOI for any paper. Each work says whether it is already in the
+        library (in_library: its citekey) and whether an open-access PDF exists; `add`
+        its DOI or arXiv id to fetch it."""
+        from .graph import Graph
+        from .sources import Http
+
+        if direction not in ("references", "cited_by"):
+            return {"error": 'direction must be "references" or "cited_by"'}
+        index = state.fresh()
+        http = Http(state.config.metadata.contact_email)
+        try:
+            graph = Graph(http, index)
+            try:
+                work = graph.work_for(citekey) if citekey else graph.lookup(doi=doi)
+            except LookupError as error:
+                return {"error": str(error)}
+            if work is None:
+                return {"error": "OpenAlex does not know this paper"}
+            works = (
+                graph.cited_by(work, limit)
+                if direction == "cited_by"
+                else graph.references(work)[:limit]
+            )
+        finally:
+            http.close()
+        return {
+            "paper": work.as_dict(),
+            "direction": direction,
+            "count": len(works),
+            "works": [w.as_dict() for w in works],
+        }
+
     @server.tool(
         annotations=types.ToolAnnotations(
             read_only_hint=False, destructive_hint=False, open_world_hint=True
@@ -228,7 +266,8 @@ def build_server() -> MCPServer:
     )
     def add(target: str, topic: str = "", agent: str = "claude") -> dict:
         """Add a paper to the library: a local PDF/office file path (copied, never moved),
-        a DOI ("doi:10.…" or bare), or an arXiv id ("arxiv:2101.12345", downloaded).
+        a DOI ("doi:10.…" or bare; its open-access PDF is fetched when one exists), or an
+        arXiv id ("arxiv:2101.12345", downloaded).
         Citadel identifies, names and files it; if unsure it waits in the user's review
         queue. Give `topic` (see `topics`) when you know it. Duplicates are refused."""
         from .ingest import Ingester

@@ -435,3 +435,43 @@ def test_retry_keeps_metadata_corrected_by_hand(setup):
     assert result.file == "main.pdf" and result.status == "filed"
     assert result.title == "The right title of this paper"  # not the wrong match
     assert index.get(result.citekey)["year"] == 2015
+
+
+def test_fetch_with_an_open_access_pdf(setup, monkeypatch):
+    from citadel.graph import Graph, Work
+
+    ingester, library, index, _ = setup
+
+    def download(self, work, target):
+        target.write_bytes(b"%PDF-1.4 open")
+        return True
+
+    monkeypatch.setattr(Graph, "download", download)
+    monkeypatch.setattr(sources, "crossref", lambda http, doi: None)
+    result = ingester.fetch(Work("W1", Metadata(**GOOD.__dict__)), fallback_topic="optics")
+    assert result.status == "filed" and result.file == f"doi:{GOOD.doi}"
+    folder = library.root / result.folder
+    assert (folder / f"{folder.name}.pdf").read_bytes() == b"%PDF-1.4 open"
+
+
+def test_fetch_without_pdf_uses_the_fallback_topic(setup, monkeypatch):
+    from citadel.graph import Graph, Work
+
+    ingester, library, index, _ = setup
+    monkeypatch.setattr(Graph, "download", lambda self, work, target: False)
+    monkeypatch.setattr(sources, "crossref", lambda http, doi: None)
+    vague = Metadata(
+        title="Something rather general about things",
+        authors=["Doe, J."],
+        year=1999,
+        doi="10.1/vague",
+    )
+    result = ingester.fetch(Work("W2", vague), fallback_topic="optics/wave-optics")
+    assert result.status == "filed" and result.reason == "metadata only (no open-access PDF)"
+    assert result.folder.startswith("optics/wave-optics/")
+    again = ingester.fetch(Work("W2", vague))
+    assert again.status == "error" and "already in the library" in again.reason
+    unclear = ingester.fetch(
+        Work("W3", Metadata(title="Vague words only here", year=2000, authors=["Roe, R."]))
+    )
+    assert unclear.status == "error" and "topic is unclear" in unclear.reason

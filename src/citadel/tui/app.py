@@ -120,6 +120,7 @@ class Citadel(App):
         Binding("m", "convert", "Markdown"),
         Binding("a", "add", "Add"),
         Binding("i", "review", "Review"),
+        Binding("f", "references", "References"),
         Binding("D", "duplicates", "Duplicates", show=False),
         Binding("tab", "focus_next", "Switch pane", show=False),
         Binding("question_mark", "about", "About", key_display="?"),
@@ -456,7 +457,16 @@ class Citadel(App):
     # -- actions on the selected reference ---------------------------------------------
 
     def check_action(self, action: str, parameters) -> bool | None:
-        needs_row = {"preview", "open_pdf", "copy", "cycle_status", "edit", "move", "convert"}
+        needs_row = {
+            "preview",
+            "open_pdf",
+            "copy",
+            "cycle_status",
+            "edit",
+            "move",
+            "convert",
+            "references",
+        }
         if action in needs_row and self.current_key() is None:
             return False
         return True
@@ -693,6 +703,57 @@ class Citadel(App):
         self.reload()
         if isinstance(self.screen, DuplicatesScreen):
             self.screen.refresh_groups(self.duplicate_groups)
+
+    def action_references(self) -> None:
+        from .references import ReferencesScreen
+
+        row = self.current_row()
+        self.push_screen(ReferencesScreen(row["citekey"], row["topic"], self.tones))
+
+    @work(thread=True, group="ingest")
+    def fetch_works(self, works, fallback_topic: str, parent: str) -> None:
+        """Add works found in the citation graph: open-access PDF when there is one."""
+        from ..ingest import Ingester
+        from ..sources import Http, SourceError
+        from .references import ReferencesScreen
+
+        filed, notes = [], []
+        with self.ingest_lock:
+            index = Index(paths.INDEX_FILE, self.library.root)
+            http = Http(self.config.metadata.contact_email)
+            try:
+                ingester = Ingester(self.library, index, http, self.config)
+                for number, w in enumerate(works, 1):
+                    self.busy = f"fetching {number}/{len(works)}: {w.label}"
+                    try:
+                        result = ingester.fetch(
+                            w, fallback_topic=fallback_topic, source=f"refs:{parent}"
+                        )
+                    except (OSError, ValueError, SourceError) as error:
+                        notes.append(f"{w.label}: {error}")
+                        continue
+                    if result.status == "filed":
+                        filed.append(result.citekey)
+                    if result.status != "filed" or "metadata only" in result.reason:
+                        notes.append(f"{w.label}: {result.status}, {result.reason}")
+            finally:
+                self.busy = ""
+                http.close()
+                index.close()
+        summary = f"Added {len(filed)} of {len(works)}"
+        if notes:
+            summary += "\n" + "\n".join(notes[:6])
+        self.call_from_thread(
+            self.notify,
+            summary,
+            timeout=8,
+            severity="warning" if len(filed) < len(works) else "information",
+        )
+        self.call_from_thread(self.reload)
+        if isinstance(self.screen, ReferencesScreen):
+            self.call_from_thread(self.screen.refresh_marks)
+        if filed and self.config.convert.auto:
+            self.call_from_thread(self.convert, filed)
 
     def action_about(self) -> None:
         self.push_screen(AboutScreen(__version__, str(self.library.root)))

@@ -247,3 +247,74 @@ async def test_review_edit_sends_corrections(make_app):
         assert (action, names) == ("edit", ["slides.pdf"])
         assert changes["title"] == "Detector physics" and changes["year"] == 2021
         assert changes["authors"] == ["Bindi, Marcello"] and "tags" not in changes
+
+
+async def test_reference_tree_explore_back_and_add(make_app, monkeypatch):
+    from contextlib import contextmanager
+
+    from citadel.graph import Work
+    from citadel.sources import Metadata
+    from citadel.tui import references as refs_module
+    from citadel.tui.references import ReferencesScreen
+
+    def w(id, title, refs=(), citekey="", pdf=""):
+        work = Work(
+            id,
+            Metadata(title=title, authors=["Smith, A."], year=2001),
+            pdf_url=pdf,
+            references=list(refs),
+        )
+        work.citekey = citekey
+        return work
+
+    tree = {
+        "W1": w("W1", "Root paper", ("W2", "W3"), citekey="verma2004statistical"),
+        "W2": w("W2", "First reference", ("W4",), pdf="https://x/a.pdf"),
+        "W3": w("W3", "Second reference"),
+        "W4": w("W4", "Deeper reference"),
+    }
+
+    class FakeGraph:
+        def __init__(self, http, index):
+            pass
+
+        def work_for(self, citekey):
+            return tree["W1"]
+
+        def references(self, work):
+            return [tree[r] for r in work.references]
+
+        def cited_by(self, work, limit=50):
+            return [tree["W4"]]
+
+    @contextmanager
+    def no_network():
+        yield None, None
+
+    monkeypatch.setattr(refs_module, "Graph", FakeGraph)
+    monkeypatch.setattr(refs_module, "_connections", no_network)
+    app, _ = make_app()
+    fetched = []
+    async with app.run_test(size=(140, 44)) as pilot:
+        app.fetch_works = lambda works, topic, parent: fetched.append(
+            ([x.id for x in works], topic, parent)
+        )
+        await pilot.press("down", "f")  # verma2004statistical is the second row
+        await pilot.pause(0.3)
+        screen = app.screen
+        assert isinstance(screen, ReferencesScreen)
+        assert [x.id for x in screen.works] == ["W2", "W3"]
+        await pilot.press("right")
+        await pilot.pause(0.3)
+        assert [x.id for x in screen.trail] == ["W1", "W2"]
+        assert [x.id for x in screen.works] == ["W4"]
+        await pilot.press("left")
+        await pilot.pause(0.3)
+        assert [x.id for x in screen.trail] == ["W1"]
+        await pilot.press("v", "v", "a")  # mark both references, add them
+        assert fetched == [
+            (["W2", "W3"], "plasma-physics/turbulence-transport", "verma2004statistical")
+        ]
+        await pilot.press("tab")
+        await pilot.pause(0.3)
+        assert screen.direction == "cited_by" and [x.id for x in screen.works] == ["W4"]
