@@ -25,6 +25,8 @@ command -v omarchy-shell &>/dev/null && omarchy-shell shell rescanPlugins &>/dev
 
 [[ -L $HOME/.claude/skills/citadel ]] && rm "$HOME/.claude/skills/citadel"
 command -v claude &>/dev/null && claude mcp remove --scope user citadel &>/dev/null || true
+[[ -L $HOME/.copilot/skills/citadel ]] && rm "$HOME/.copilot/skills/citadel"
+command -v copilot &>/dev/null && copilot mcp remove citadel &>/dev/null || true
 
 rm -f "$HOME/.local/share/applications/citadel.desktop"
 rm -f "$HOME/.local/share/icons/hicolor/256x256/apps/citadel.png"

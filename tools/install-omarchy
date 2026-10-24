@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Install Citadel into Omarchy: `citadel` command, apps-menu entry with icon, the
 # inbox watcher (systemd user service), the desktop conversion widget (shell
-# plugin), and for agents the Claude Code skill and MCP server. Safe to run again, e.g. after pulling changes or moving the project.
+# plugin), and for agents the skill and MCP server (Claude Code and Copilot CLI). Safe to run again, e.g. after pulling changes or moving the project.
 # Your library on OneDrive is never touched. Undo with tools/uninstall-omarchy.
 set -euo pipefail
 
@@ -101,23 +101,36 @@ else
   note "Desktop widget: copied; enable it with: omarchy plugin enable $PLUGIN_ID"
 fi
 
-# 7. Agents: the Claude Code skill (a link, so it follows the repo) and the MCP server.
-SKILL="$HOME/.claude/skills/citadel"
-if [[ -e $SKILL && ! -L $SKILL ]]; then
-  note "Agent skill: $SKILL exists and is not a link; left alone"
-else
-  mkdir -p "$(dirname "$SKILL")"
-  ln -sfn "$ROOT/omarchy/skill/citadel" "$SKILL"
-  step "Agent skill: $SKILL"
-fi
+# 7. Agents: the skill (a link, so it follows the repo) and the MCP server, for Claude Code
+# and, when installed, GitHub Copilot CLI.
+skill_dirs=("$HOME/.claude/skills")
+command -v copilot &>/dev/null && skill_dirs+=("$HOME/.copilot/skills")
+for dir in "${skill_dirs[@]}"; do
+  SKILL="$dir/citadel"
+  if [[ -e $SKILL && ! -L $SKILL ]]; then
+    note "Agent skill: $SKILL exists and is not a link; left alone"
+  else
+    mkdir -p "$dir"
+    ln -sfn "$ROOT/omarchy/skill/citadel" "$SKILL"
+    step "Agent skill: $SKILL"
+  fi
+done
+registered=0
 if command -v claude &>/dev/null; then
   if ! claude mcp get citadel &>/dev/null; then
     claude mcp add --scope user citadel -- "$BIN" mcp >/dev/null
   fi
   step "MCP server: citadel (Claude Code, all projects)"
-else
-  note "MCP server: Claude Code not found; register \"$BIN mcp\" with your agent"
+  registered=1
 fi
+if command -v copilot &>/dev/null; then
+  if ! copilot mcp get citadel &>/dev/null; then
+    copilot mcp add citadel -- "$BIN" mcp >/dev/null
+  fi
+  step "MCP server: citadel (Copilot CLI, all projects)"
+  registered=1
+fi
+((registered)) || note "MCP server: no Claude Code or Copilot CLI found; register \"$BIN mcp\" with your agent"
 
 # 8. PDF -> Markdown (optional, several GB): not installed by this script.
 if [[ ! -x $ROOT/.venv-convert/bin/python ]]; then

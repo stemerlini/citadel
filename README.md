@@ -87,8 +87,9 @@ Every command takes `--json`.
 
 ## Agents
 
-`tools/install-omarchy` registers Citadel with Claude Code (user scope) and links the
-`citadel` skill into `~/.claude/skills/`, so any agent session can use your library:
+`tools/install-omarchy` registers the Citadel MCP server with Claude Code (user scope) and
+GitHub Copilot CLI (`~/.copilot/mcp-config.json`), and links the `citadel` skill into
+`~/.claude/skills/` and `~/.copilot/skills/`, so any agent session can use your library:
 
 | MCP tool | Does |
 |---|---|
