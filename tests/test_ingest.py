@@ -533,3 +533,5 @@ def test_empty_file_waits_then_goes_to_review_saying_so(setup):
     result = ingester.ingest(empty)
     assert result.status == "review"
     assert "empty" in result.reason
+    assert ingester.reject("paper.pdf").status == "deleted"  # not kept in _attachments
+    assert not list(library.review.iterdir())

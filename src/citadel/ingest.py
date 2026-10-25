@@ -859,6 +859,10 @@ class Ingester:
             path.unlink()
             sidecar.unlink(missing_ok=True)
             return Result(str(path), "deleted", f"exact duplicate of {proposal.duplicate_of}")
+        if path.stat().st_size == 0:  # nothing in it to keep
+            path.unlink()
+            sidecar.unlink(missing_ok=True)
+            return Result(str(path), "deleted", "empty file")
         attachments = self.library.attachments
         attachments.mkdir(exist_ok=True)
         # Not a reference: it goes back to the name it arrived with.
