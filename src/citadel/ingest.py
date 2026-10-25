@@ -22,6 +22,7 @@ import re
 import shutil
 import tempfile
 import time
+import unicodedata
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
@@ -357,14 +358,19 @@ class Ingester:
             raise ValueError(f"{citekey} already has a PDF")
         found = identify_text(read_pdf(path), self.http)
         data = row["data"]
-        same = found.metadata and (
-            (data.get("doi") and found.metadata.doi == data["doi"])
-            or title_key(
-                found.metadata.title,
-                found.metadata.year,
-                naming.surname(found.metadata.authors[0]) if found.metadata.authors else "",
+        meta = found.metadata
+        author = naming.surname(meta.authors[0]) if meta and meta.authors else ""
+        wanted = title_key(row["title"], row["year"], row["first_author"])
+        # A preprint often appears a year before the journal version.
+        years = {meta.year, meta.year + 1, meta.year - 1} if meta and meta.year else {None}
+        same = meta and (
+            (data.get("doi") and meta.doi == data["doi"])
+            or (wanted and wanted in {title_key(meta.title, y, author) for y in years})
+            or (
+                author.lower() == (row["first_author"] or "").lower()
+                and row["year"] in years
+                and similar_titles(meta.title, row["title"])
             )
-            == title_key(row["title"], row["year"], row["first_author"])
         )
         if not same:
             seen = found.metadata.title[:70] if found.metadata else "nothing recognisable"
@@ -928,6 +934,22 @@ def title_key(title: str, year, author: str) -> str | None:
     if len(words) < 3 or not author:
         return None
     return f"{' '.join(words)}|{year or ''}|{author.lower()}"
+
+
+def similar_titles(a: str, b: str, threshold: float = 0.8) -> bool:
+    """Nearly the same words (a preprint and its journal version differ in spelling,
+    punctuation or LaTeX: magnetised/magnetized, "--"/"-", ${\\cal M}_s$/Sonic Mach)."""
+
+    def words(title: str) -> set[str]:
+        plain = unicodedata.normalize("NFKD", title).encode("ascii", "ignore").decode().lower()
+        return {
+            re.sub(r"is(e|ed|es|ing|ation)$", r"iz\1", w) for w in re.findall(r"[a-z0-9]+", plain)
+        }
+
+    first, second = words(a), words(b)
+    if len(first) < 3 or len(second) < 3:
+        return False
+    return len(first & second) / len(first | second) >= threshold
 
 
 def review_name(proposal: Proposal, fallback: str) -> str:

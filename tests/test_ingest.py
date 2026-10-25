@@ -518,6 +518,30 @@ def test_attach_checks_it_is_the_same_paper(setup, tmp_path):
         ingester.attach_pdf(ref.citekey, pdf)
 
 
+def test_attach_accepts_the_preprint_a_year_early(setup, tmp_path):
+    ingester, library, index, state = setup
+    ref = ingester.file_metadata_only(Metadata(**GOOD.__dict__), "optics", "refs:x")
+    pdf = tmp_path / "x.pdf"
+    pdf.write_bytes(b"%PDF the preprint")
+    state["meta"] = Metadata(title=GOOD.title, authors=GOOD.authors, year=2016, arxiv="1601.0001")
+    assert ingester.attach_pdf(ref.citekey, pdf).status == "filed"
+
+
+def test_similar_titles_tolerates_spelling_not_other_papers():
+    from citadel.ingest import similar_titles
+
+    assert similar_titles(
+        "The Density Variance--Mach Number Relation in Supersonic Turbulence: "
+        "I. Isothermal, magnetised gas",
+        "The density variance-Mach number relation in supersonic turbulence - "
+        "I. Isothermal, magnetized gas",
+    )
+    assert not similar_titles(
+        "The star formation rate of turbulent magnetized clouds",
+        "On the star formation efficiency of turbulent magnetized clouds",
+    )
+
+
 def test_empty_file_waits_then_goes_to_review_saying_so(setup):
     import os
     import time

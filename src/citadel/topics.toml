@@ -96,6 +96,20 @@ keywords = ["field-reversed configuration", "FRC", "PFRC", "magneto-inertial", "
 description = "Plasma-based accelerators: plasma wakefield and laser-driven acceleration."
 keywords = ["plasma wakefield", "wakefield acceleration", "laser wakefield", "LWFA", "PWFA", "accelerator"]
 
+# --- Astrophysics -------------------------------------------------------------
+
+["astrophysics"]
+description = "Astrophysics in general: observations, theory and simulations of astrophysical plasmas (laboratory astrophysics is under plasma-physics/hedp)."
+keywords = ["astrophysics", "astronomy", "galaxy", "galaxies", "stellar", "interstellar", "cosmic"]
+
+["astrophysics/interstellar-medium"]
+description = "The interstellar medium: supersonic ISM turbulence, density PDFs, molecular clouds, filaments and star formation."
+keywords = ["interstellar medium", "ISM", "molecular cloud", "molecular clouds", "star formation", "star formation rate", "supersonic turbulence", "density variance", "lognormal", "density PDF", "filaments", "supernova-driven", "Mach number"]
+
+["astrophysics/radio-propagation"]
+description = "Wave and particle propagation through astrophysical plasma: interstellar scintillation, scattering, pulsars, fast radio bursts, cosmic-ray transport."
+keywords = ["scintillation", "interstellar scintillation", "pulsar", "pulsars", "fast radio burst", "FRB", "radio-wave scattering", "extreme scattering", "plasma lensing", "dispersion measure", "cosmic ray", "cosmic rays", "cosmic-ray transport"]
+
 # --- Optics -------------------------------------------------------------------
 
 ["optics"]
