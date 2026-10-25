@@ -46,6 +46,13 @@ COMPANION = re.compile(
 TEMPORARY_SUFFIXES = (".part", ".crdownload", ".download", ".tmp", ".partial", ".opdownload")
 
 
+EMPTY_PATIENCE = 15 * 60  # seconds an empty inbox file is given to fill in
+EMPTY_REASON = (
+    "the file is empty (0 bytes): its download or OneDrive sync did not finish; "
+    "delete it and drop the PDF again"
+)
+
+
 @dataclass
 class Proposal:
     """What Citadel would do with a file in review, and why it did not."""
@@ -113,7 +120,11 @@ class Ingester:
                 continue
             if path.name.lower().endswith(TEMPORARY_SUFFIXES):
                 continue
-            if now - path.stat().st_mtime < self.config.ingest.settle_seconds:
+            stat = path.stat()
+            if now - stat.st_mtime < self.config.ingest.settle_seconds:
+                continue
+            # An empty file is usually a download or sync that has not finished.
+            if stat.st_size == 0 and now - stat.st_mtime < EMPTY_PATIENCE:
                 continue
             ready.append(path)
         return ready
@@ -147,6 +158,14 @@ class Ingester:
             return Result(str(path), "error", f"{type(error).__name__}: {error}")
 
     def _ingest(self, path, source, keep_source, known, chosen_topic, dry_run) -> Result:
+        if path.stat().st_size == 0:
+            return self._review_or_report(
+                path,
+                Proposal(path.name, EMPTY_REASON, sha256(path)),
+                keep_source,
+                dry_run,
+                source,
+            )
         parent = self.parent_of(path)
         if parent:
             return self._attach(path, parent, keep_source, dry_run)

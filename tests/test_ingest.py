@@ -516,3 +516,20 @@ def test_attach_checks_it_is_the_same_paper(setup, tmp_path):
     assert result.status == "filed" and pdf.exists()  # copied, not moved
     with pytest.raises(ValueError, match="already has a PDF"):
         ingester.attach_pdf(ref.citekey, pdf)
+
+
+def test_empty_file_waits_then_goes_to_review_saying_so(setup):
+    import os
+    import time
+
+    ingester, library, _, _ = setup
+    empty = drop(library, content=b"")
+    old = time.time() - 120
+    os.utime(empty, (old, old))
+    assert ingester.pending() == []  # still syncing, perhaps
+    older = time.time() - ingest_module.EMPTY_PATIENCE - 1
+    os.utime(empty, (older, older))
+    assert ingester.pending() == [empty]
+    result = ingester.ingest(empty)
+    assert result.status == "review"
+    assert "empty" in result.reason

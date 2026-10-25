@@ -24,6 +24,7 @@ from ..config import Config
 from ..index import Index
 from ..library import Library
 from . import logo
+from .fields import Field
 from .screens import (
     AboutScreen,
     DuplicatesScreen,
@@ -167,7 +168,7 @@ class Citadel(App):
                 yield Tree("Library", id="topics")
             with Vertical(id="main"):
                 yield Static(id="list-title", classes="pane-title")
-                yield Input(
+                yield Field(
                     placeholder="Search titles, authors, abstracts and full text…  (Esc to clear)",
                     id="search",
                 )

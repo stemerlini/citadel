@@ -28,6 +28,7 @@ from textual_image.widget import Image
 from .. import record
 from ..record import TYPES, Reference
 from . import logo
+from .fields import Field, Notes
 from .pages import page_image
 
 
@@ -224,7 +225,7 @@ class TopicPicker(ModalScreen[str | None]):
     def compose(self) -> ComposeResult:
         with Vertical(classes="dialog"):
             yield Static(self.prompt, classes="title")
-            yield Input(placeholder="type to filter…", id="topic-filter")
+            yield Field(placeholder="type to filter…", id="topic-filter")
             yield OptionList(id="topic-list")
 
     def on_mount(self) -> None:
@@ -281,7 +282,7 @@ class Prompt(ModalScreen[str | None]):
             yield Static(self.title_text, classes="title")
             if self.hint:
                 yield Static(self.hint, classes="subtitle")
-            yield Input(placeholder=self.placeholder, id="prompt-input")
+            yield Field(placeholder=self.placeholder, id="prompt-input")
 
     def on_mount(self) -> None:
         self.query_one(Input).focus()
@@ -331,11 +332,11 @@ class EditScreen(ModalScreen[dict | None]):
             )
             for key, label in self.FIELDS:
                 yield Static(label, classes="field-label")
-                yield Input(values[key], id=f"edit-{key}")
+                yield Field(values[key], id=f"edit-{key}")
             yield Static("Type", classes="field-label")
             yield Select([(t, t) for t in TYPES], value=ref.type, allow_blank=False, id="edit-type")
             yield Static("Abstract", classes="field-label")
-            yield TextArea(ref.abstract, id="edit-abstract", soft_wrap=True)
+            yield Notes(ref.abstract, id="edit-abstract", soft_wrap=True)
 
     def action_save(self) -> None:
         get = lambda key: self.query_one(f"#edit-{key}", Input).value.strip()  # noqa: E731
