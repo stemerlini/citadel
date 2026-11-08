@@ -1,8 +1,25 @@
+<p align="center"><img src="assets/banner.png" alt="Citadel: a reference library for scientists, in the terminal" width="100%"></p>
+
 # Citadel
 
-A reference library for scientists, in the terminal. Drop papers in an inbox and
-Citadel renames, catalogues and converts them, cites them, and serves them to
-agents. See [PLAN.md](PLAN.md) for the design and the phases.
+A reference library for scientists, in the terminal: a keyboard-driven Mendeley for
+[Omarchy](https://omarchy.org) whose library is plain files on your OneDrive.
+
+- **Drop it in the inbox, it gets filed.** PDFs (and slides, standards, theses) are
+  identified from their DOI, arXiv id or text through Crossref, OpenAlex and arXiv,
+  renamed, and filed under a topic folder. Anything uncertain waits in a review queue.
+- **Cite without leaving the keyboard.** Stable citekeys, formatted references, BibTeX
+  and a `library.bib` for LaTeX and Pandoc.
+- **Read it as text.** PDFs become Markdown with equations and figures (Marker, on the
+  GPU), so search covers the full text and agents can quote it.
+- **Follow the citations.** A paper's references and citing works, with open-access
+  PDFs fetched in one keystroke; paywalled ones through your library's sign-in.
+- **Built for agents.** An MCP server and an agent skill let Claude Code and Copilot
+  search, read and cite your library.
+- **Your files stay yours.** No paid services and no lock-in: every reference is a
+  folder holding the PDF and a Markdown file with YAML metadata.
+
+See [PLAN.md](PLAN.md) for the design and the phases.
 
 ## Install (Omarchy)
 

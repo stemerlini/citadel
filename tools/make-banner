@@ -1,0 +1,112 @@
+#!/usr/bin/env python3
+"""Draw the README banner (assets/banner.png) from the logo sprites.
+
+Needs rsvg-convert (librsvg) and the JetBrains Mono font; run from anywhere:
+    .venv/bin/python tools/make-banner
+"""
+
+import random
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "src"))
+
+from citadel.tui.logo import PALETTE, SMALL, sprite, wordmark  # noqa: E402
+
+W, H = 1280, 400
+NIGHT_TOP, NIGHT_BOTTOM = "#14121f", "#26233a"
+INK, MUTED = "#e0def4", "#908caa"
+FONT = "JetBrainsMono Nerd Font, JetBrains Mono, monospace"
+
+
+def pixels(rows: list[str], x0: float, y0: float, size: float) -> str:
+    out = []
+    for y, row in enumerate(rows):
+        for x, ch in enumerate(row):
+            if ch in PALETTE:
+                out.append(
+                    f'<rect x="{x0 + x * size:g}" y="{y0 + y * size:g}" '
+                    f'width="{size:g}" height="{size:g}" fill="{PALETTE[ch]}"/>'
+                )
+    return "".join(out)
+
+
+def stars(clear: list[tuple[float, float, float, float]]) -> str:
+    """Scattered stars, kept out of the clear boxes (x0, y0, x1, y1) around the text."""
+    rng = random.Random(7)
+    out = []
+    while len(out) < 60:
+        x, y = rng.uniform(0, W), rng.uniform(0, H * 0.7)
+        if any(x0 <= x <= x1 and y0 <= y <= y1 for x0, y0, x1, y1 in clear):
+            continue
+        size = rng.choice([2, 2, 2, 3, 4])
+        opacity = rng.uniform(0.25, 0.85)
+        out.append(
+            f'<rect x="{x:.0f}" y="{y:.0f}" width="{size}" height="{size}" '
+            f'fill="{INK}" opacity="{opacity:.2f}"/>'
+        )
+    return "".join(out)
+
+
+def hills(ground: int) -> str:
+    """A stepped pixel horizon behind level ground."""
+    rng = random.Random(3)
+    step, out, height = 16, [], 70
+    for x in range(0, W, step):
+        height = max(50, min(110, height + rng.choice([-8, 0, 0, 8])))
+        out.append(
+            f'<rect x="{x}" y="{H - height}" width="{step}" height="{height}" fill="#1f1d2e"/>'
+        )
+    out.append(f'<rect x="0" y="{H - ground}" width="{W}" height="{ground}" fill="#191724"/>')
+    return "".join(out)
+
+
+def svg() -> str:
+    castle = sprite(SMALL)
+    word = wordmark()
+    castle_px, word_px, ground = 18, 13, 44
+    castle_x, castle_y = 90, H - ground - len(castle) * castle_px
+    text_x = castle_x + len(castle[0]) * castle_px + 64
+    word_y = 96
+    tagline_y = word_y + len(word) * word_px + 54
+    clear = [
+        (text_x - 30, word_y - 30, W - 40, tagline_y + 60),
+        (castle_x - 30, castle_y - 30, castle_x + len(castle[0]) * castle_px + 30, H),
+        (W - 210, 30, W - 70, 150),
+    ]
+    tagline = "A reference library for scientists, in the terminal."
+    features = "inbox → filed  ·  citekeys &amp; BibTeX  ·  PDF → Markdown  ·  MCP for agents"
+    return f"""<svg xmlns="http://www.w3.org/2000/svg" width="{W}" height="{H}"
+viewBox="0 0 {W} {H}">
+<defs><linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+<stop offset="0" stop-color="{NIGHT_TOP}"/><stop offset="1" stop-color="{NIGHT_BOTTOM}"/>
+</linearGradient></defs>
+<rect width="{W}" height="{H}" fill="url(#sky)"/>
+<mask id="crescent"><rect width="{W}" height="{H}" fill="white"/>
+<circle cx="{W - 124}" cy="80" r="30" fill="black"/></mask>
+{stars(clear)}
+<circle cx="{W - 140}" cy="88" r="32" fill="#f6c177" mask="url(#crescent)"/>
+{hills(ground)}
+{pixels(castle, castle_x, castle_y, castle_px)}
+{pixels(word, text_x, word_y, word_px)}
+<g font-family="{FONT}">
+<text x="{text_x}" y="{tagline_y}" font-size="25" fill="{INK}">{tagline}</text>
+<text x="{text_x}" y="{tagline_y + 38}" font-size="17" fill="{MUTED}">{features}</text>
+</g>
+</svg>"""
+
+
+def main() -> None:
+    target = ROOT / "assets" / "banner.png"
+    with tempfile.NamedTemporaryFile("w", suffix=".svg") as handle:
+        handle.write(svg())
+        handle.flush()
+        subprocess.run(["rsvg-convert", "--zoom", "2", "-o", str(target), handle.name], check=True)
+    print(target)
+
+
+if __name__ == "__main__":
+    main()
