@@ -37,6 +37,16 @@ class MetadataConfig:
 
 
 @dataclass
+class AccessConfig:
+    # Your library's sign-in for paywalled papers (see access.py). Empty name: pages open
+    # in your usual browser instead.
+    name: str = ""
+    login_url: str = ""
+    proxy: str = ""  # EZproxy-style prefix put before publisher links; empty for none
+    browser: str = "chromium"
+
+
+@dataclass
 class ConvertConfig:
     python: str = ".venv-convert/bin/python"  # Marker's own environment, relative to the app root
     device: str = "cuda"  # cuda | cpu
@@ -50,6 +60,7 @@ class Config:
     obsidian: ObsidianConfig = field(default_factory=ObsidianConfig)
     ingest: IngestConfig = field(default_factory=IngestConfig)
     metadata: MetadataConfig = field(default_factory=MetadataConfig)
+    access: AccessConfig = field(default_factory=AccessConfig)
     convert: ConvertConfig = field(default_factory=ConvertConfig)
 
     @property
@@ -79,7 +90,7 @@ class Config:
         config = cls()
         if isinstance(data.get("library"), str):
             config.library = data["library"]
-        for name in ("obsidian", "ingest", "metadata", "convert"):
+        for name in ("obsidian", "ingest", "metadata", "access", "convert"):
             section = getattr(config, name)
             values = data.get(name)
             if not isinstance(values, dict):
@@ -118,6 +129,18 @@ watch_interval = 30
 [metadata]
 # Optional contact address sent to Crossref/OpenAlex for faster, polite access.
 contact_email = ""
+
+[access]
+# Sign-in for paywalled papers through your library (`citadel login`, or L in the app).
+# Citadel opens publisher pages in its own Chromium profile, where you sign in once; a
+# PDF you download there goes straight into the inbox and is attached to its reference.
+# Empty name: pages open in your usual browser.
+# Imperial:   name = "imperial", login_url = "https://library-search.imperial.ac.uk/"
+# EZproxy library: also set proxy, e.g. "https://proxy.example.org/login?url="
+name = ""
+login_url = ""
+proxy = ""
+browser = "chromium"
 
 [convert]
 # Python of Marker's own environment (relative paths are inside the app folder).

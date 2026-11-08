@@ -67,11 +67,23 @@ citadel          # opens the TUI
 | `i` | review queue (`a` accept, `t` other topic, `d` DOI, `x` reject, `v` mark, `R` retry) | `D` | duplicates: keep one copy |
 | `f` | citation tree: references / cited by, step in (`Enter`) and back (`←`), `a` add | | |
 | `w` | open the publisher page (DOI) | `g` | Google search for the paper |
+| `L` | sign in to your library (paywalled papers) | `?` | about |
 
 No PDF for a reference (MD column `—`)? Press `w` (or `g`), download it with your
 institutional access, and drop it into `_inbox/`: Citadel recognises it and attaches it to
 that reference. `citadel attach CITEKEY file.pdf` does the same by hand.
-| `?` | about | | |
+
+### Paywalled papers: library sign-in
+
+Set `[access]` in the config (Imperial: `name = "imperial"`,
+`login_url = "https://library-search.imperial.ac.uk/"`) and run `citadel login` (or `L`)
+once to sign in. From then on `w`, `g` and `citadel web` open pages in Citadel's own
+Chromium profile, signed in to your library, and every download there lands in
+`_inbox/`. On a publisher's page, use "Access through your institution" the first time,
+then click the PDF button: the watcher attaches the file to its reference. You do the
+clicking and Citadel never sees your password; the session stays in
+`data/browser/<name>/` on this machine. For a library that uses EZproxy, also set
+`proxy` to its prefix and publisher links go through it.
 
 Slides, posters, books, standards and reports stay filed under their topic and are also
 gathered in the sidebar by kind. Slides and posters are recognised from their pages (landscape,

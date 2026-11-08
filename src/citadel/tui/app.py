@@ -132,6 +132,7 @@ class Citadel(App):
         Binding("f", "references", "References"),
         Binding("w", "web(False)", "Web", show=False),
         Binding("g", "web(True)", "Google", show=False),
+        Binding("L", "login", "Sign in", show=False),
         Binding("D", "duplicates", "Duplicates", show=False),
         Binding("tab", "focus_next", "Switch pane", show=False),
         Binding("question_mark", "about", "About", key_display="?"),
@@ -731,18 +732,37 @@ class Citadel(App):
             self.screen.refresh_groups(self.duplicate_groups)
 
     def action_web(self, google: bool) -> None:
-        """The paper online: publisher page (w) or a Google search (g)."""
-        from .. import web
+        """The paper online: publisher page (w) or a Google search (g), through the
+        library sign-in when there is one."""
+        from .. import access, web
 
         data = self.index.get(self.current_key())["data"]
         url = web.best_url(data, google=google)
-        web.open_url(url)
+        access.open_page(self.config.access, self.library.inbox, url, publisher=not google)
         hint = (
             "Download it into the inbox: Citadel attaches it here."
             if not self.current_row()["has_pdf"]
             else ""
         )
         self.notify(f"Opened {url}\n{hint}".strip(), timeout=6)
+
+    def action_login(self) -> None:
+        """Sign in to the library, in Citadel's own browser profile."""
+        from .. import access
+
+        if not access.enabled(self.config.access):
+            self.notify(
+                "No library sign-in set: fill in [access] in the config.", severity="warning"
+            )
+            return
+        if access.login(self.config.access, self.library.inbox):
+            self.notify(
+                f"Sign in to {self.config.access.name} in the browser window. "
+                "PDFs you download there land in the inbox.",
+                timeout=8,
+            )
+        else:
+            self.notify(f"Could not start {self.config.access.browser}.", severity="error")
 
     def action_references(self) -> None:
         from .references import ReferencesScreen

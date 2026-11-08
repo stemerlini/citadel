@@ -19,6 +19,7 @@
     citadel mcp             serve the library to agents (MCP over stdio)
     citadel refs KEY        a paper's references (or --cited-by); --add N… fetches them
     citadel web KEY         open the paper online (publisher page, or --google search)
+    citadel login           sign in to your library for paywalled papers
     citadel attach KEY PDF  give a reference without a PDF its PDF
     citadel bib             write library.bib (all references, BibTeX) in the library
     citadel --version
@@ -124,6 +125,7 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         "converter": str(converter),
         "converter_installed": converter.exists(),
         "gpu": shutil.which("nvidia-smi") is not None,
+        "access": config.access.name or None,
     }
     status = "ok" if not problems else f"{len(problems)} problem(s)"
     lines = [
@@ -136,6 +138,7 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         f"Converter: {converter} "
         f"[{'installed' if converter.exists() else 'not installed yet (Phase 4)'}]",
         f"GPU:       {'nvidia-smi found' if data['gpu'] else 'none found (Marker will use CPU)'}",
+        f"Sign-in:   {config.access.name or 'not set (pages open in your usual browser)'}",
     ]
     emit(data, args.json, "\n".join(lines))
     return 0 if not problems else 1
@@ -614,7 +617,9 @@ def cmd_refs(args: argparse.Namespace) -> int:
 
 
 def cmd_web(args: argparse.Namespace) -> int:
-    from . import web
+    from . import access, web
+    from .config import Config
+    from .library import Library
 
     index = open_index()
     row = index.get(args.citekey)
@@ -622,10 +627,41 @@ def cmd_web(args: argparse.Namespace) -> int:
     if row is None:
         emit({"error": f"no reference {args.citekey}"}, args.json, f"No reference {args.citekey}.")
         return 1
+    config = Config.load()
     url = web.best_url(row["data"], google=args.google)
-    opened = not args.print and web.open_url(url)
+    inbox = Library(config.library_path).inbox
+    opened = not args.print and access.open_page(
+        config.access, inbox, url, publisher=not args.google
+    )
     emit({"url": url, "opened": opened}, args.json, url)
     return 0
+
+
+def cmd_login(args: argparse.Namespace) -> int:
+    from . import access
+    from .config import Config
+    from .library import Library
+
+    config = Config.load()
+    if not access.enabled(config.access):
+        message = "No library sign-in set: fill in [access] in the config (see `citadel doctor`)."
+        emit({"error": message}, args.json, message)
+        return 1
+    opened = access.login(config.access, Library(config.library_path).inbox)
+    data = {
+        "library": config.access.name,
+        "profile": str(access.profile_dir(config.access)),
+        "opened": opened,
+    }
+    line = (
+        f"Sign in to {config.access.name} in the window that opened; Citadel keeps the "
+        "session.\nPDFs you download there go into the inbox and are attached to their "
+        "reference."
+        if opened
+        else f"Could not start {config.access.browser}."
+    )
+    emit(data, args.json, line)
+    return 0 if opened else 1
 
 
 def cmd_attach(args: argparse.Namespace) -> int:
@@ -843,6 +879,10 @@ def main(argv: list[str] | None = None) -> None:
     web_parser.add_argument("--google", action="store_true", help="a Google search instead")
     web_parser.add_argument("--print", action="store_true", help="only print the address")
     web_parser.set_defaults(func=cmd_web)
+
+    sub.add_parser(
+        "login", parents=[common], help="sign in to your library for paywalled papers"
+    ).set_defaults(func=cmd_login)
 
     attach = sub.add_parser("attach", parents=[common], help="add a reference's PDF")
     attach.add_argument("citekey")

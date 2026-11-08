@@ -10,8 +10,6 @@ v            mark; o open the DOI page; Esc close
 
 from __future__ import annotations
 
-import subprocess
-
 from rich.text import Text
 from textual import on, work
 from textual.app import ComposeResult
@@ -233,26 +231,20 @@ class ReferencesScreen(ModalScreen[None]):
         self.app.fetch_works(chosen, self.topic, self.citekey)
 
     def action_open_doi(self) -> None:
+        from .. import access, web
+
         w = self.current
         if w and (w.meta.doi or w.meta.arxiv):
-            url = (
-                f"https://doi.org/{w.meta.doi}"
-                if w.meta.doi
-                else f"https://arxiv.org/abs/{w.meta.arxiv}"
-            )
-            subprocess.Popen(
-                ["xdg-open", url],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                start_new_session=True,
-            )
+            url = web.publisher_url(w.meta.doi, w.meta.arxiv)
+            access.open_page(self.app.config.access, self.app.library.inbox, url)
 
     def action_google(self) -> None:
-        from .. import web
+        from .. import access, web
 
         w = self.current
         if w:
-            web.open_url(web.search_url(w.meta.title, w.meta.authors, w.meta.year))
+            url = web.search_url(w.meta.title, w.meta.authors, w.meta.year)
+            access.open_page(self.app.config.access, self.app.library.inbox, url, publisher=False)
 
     def refresh_marks(self) -> None:
         """After adding: the fetched works now show as in the library."""
