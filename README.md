@@ -20,6 +20,22 @@ The library defaults to `~/Cloud/Personal-OneDrive/Citadel`; change `library` in
 `data/config.toml` (or set `CITADEL_LIBRARY`). The topic tree lives in the
 library's `topics.toml`.
 
+## Install (another machine)
+
+The library is shared through OneDrive; each machine keeps its own index. With
+[uv](https://docs.astral.sh/uv/) and access to this repository:
+
+```sh
+uv tool install git+https://github.com/stemerlini/citadel   # `uv tool upgrade citadel` later
+citadel init --library ~/OneDrive/Citadel                  # wherever OneDrive syncs it
+citadel reindex   # builds this machine's index from the library
+citadel           # the TUI; `citadel mcp` serves the library to agents
+```
+
+`init` writes the config to `~/.local/share/citadel/data/config.toml`.
+Run the inbox watcher (`citadel watch`) on one machine only, so two machines don't
+file the same PDF at once. Opening PDFs and pages uses `xdg-open` (Linux).
+
 ## PDF → Markdown (Marker, on the GPU)
 
 Marker runs in its own environment, and its OCR model is served by llama.cpp:
