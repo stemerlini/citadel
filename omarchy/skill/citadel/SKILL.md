@@ -55,3 +55,9 @@ citadel refs CITEKEY [--cited-by] --json    # the citation tree; --add N… fetc
 
 The full text is the record's `.md` file (path from `get`), between
 `<!-- citadel:fulltext-start -->` and `<!-- citadel:fulltext-end -->`.
+
+## When Citadel itself misbehaves
+
+A failing command, wrong metadata Citadel keeps producing, or a crash is a bug in the
+user's own app: tell the user what you saw, and fix it through the `citadel-dev` skill
+when they want it fixed.

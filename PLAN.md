@@ -3,9 +3,10 @@
 > The maesters' library for an Omarchy scientist: drop a paper in, get it renamed,
 > catalogued, cited, converted to Markdown, and readable by you, Obsidian and agents.
 
-Status: Phase 6 done (2026-10-12): MCP server, Claude Code skill, library.bib; 234 tests.
-Library at `~/Cloud/Personal-OneDrive/Citadel` (31 references). Next: migration (Phase 8),
-then Obsidian when the vault exists.
+Status (2026-11-08): Phases 0-6 done, plus the citation tree, slides and posters, and the
+library sign-in for paywalled papers (`access.py`); 278 tests. Maintained from several
+Omarchy machines through pull requests on GitHub (`stemerlini/citadel`, private): see
+[AGENTS.md](AGENTS.md). Next: migration (Phase 8), then Obsidian when the vault exists.
 
 ## Goals
 
@@ -35,6 +36,8 @@ then Obsidian when the vault exists.
 | Obsidian | Library outside the vault; the vault links to it (see *Obsidian integration*) |
 | Zotero | Out of scope for now |
 | Stack | Python + Textual + textual-image (same as Toploader), SQLite index, pytest, ruff |
+| Paywalled papers | Library sign-in in Citadel's own Chromium profile (Imperial SSO now; an EZproxy prefix for libraries such as BnL). The user clicks the PDF; Citadel never drives publisher sites (2026-11-08) |
+| Maintenance | GitHub, private; every change through a pull request; the inbox watcher runs on one machine (2026-11-08) |
 | Environments | App: system Python 3.14 in `.venv`. Marker: its own Python 3.13 env (`.venv-convert`, via mise) run as a worker subprocess, because Marker pins `pillow<11` (no 3.14 wheel) and drags in PyTorch |
 
 ## Library layout

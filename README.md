@@ -39,8 +39,19 @@ library's `topics.toml`.
 
 ## Install (another machine)
 
-The library is shared through OneDrive; each machine keeps its own index. With
-[uv](https://docs.astral.sh/uv/) and access to this repository:
+The library is shared through OneDrive; each machine keeps its own index. The inbox
+watcher runs on one machine only, so two machines don't file the same PDF at once.
+
+On another Omarchy machine, clone the repository and install without the watcher (later
+runs of the installer keep it off; `--watch` turns it back on):
+
+```sh
+gh repo clone stemerlini/citadel ~/Projects/citadel
+~/Projects/citadel/tools/install-omarchy --no-watch
+citadel reindex   # builds this machine's index from the library
+```
+
+Elsewhere, with [uv](https://docs.astral.sh/uv/) and access to this repository:
 
 ```sh
 uv tool install git+https://github.com/stemerlini/citadel   # `uv tool upgrade citadel` later
@@ -49,9 +60,10 @@ citadel reindex   # builds this machine's index from the library
 citadel           # the TUI; `citadel mcp` serves the library to agents
 ```
 
-`init` writes the config to `~/.local/share/citadel/data/config.toml`.
-Run the inbox watcher (`citadel watch`) on one machine only, so two machines don't
-file the same PDF at once. Opening PDFs and pages uses `xdg-open` (Linux).
+`init` writes the config to `~/.local/share/citadel/data/config.toml`. Opening PDFs
+and pages uses `xdg-open` (Linux).
+
+Fixing or changing Citadel from any machine: see [AGENTS.md](AGENTS.md).
 
 ## PDF → Markdown (Marker, on the GPU)
 
