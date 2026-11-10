@@ -45,9 +45,10 @@ class ReferencesScreen(ModalScreen[None]):
         Binding("g", "google", "Google"),
     ]
 
-    def __init__(self, citekey: str, topic: str, tones: dict[str, str]) -> None:
+    def __init__(self, citekey: str, topic: str, tones: dict[str, str], library: str = "") -> None:
         super().__init__()
         self.citekey = citekey
+        self.library = library  # fetched works are filed in the paper's own library
         self.topic = topic  # where fetched works go when their topic is unclear
         self.tones = tones
         self.trail: list[Work] = []  # the works stepped into, root first
@@ -228,7 +229,7 @@ class ReferencesScreen(ModalScreen[None]):
             self.notify("Already in your library.", timeout=3)
             return
         self.marked.clear()
-        self.app.fetch_works(chosen, self.topic, self.citekey)
+        self.app.fetch_works(chosen, self.topic, self.citekey, self.library)
 
     def action_open_doi(self) -> None:
         from .. import access, web
@@ -260,7 +261,7 @@ class _connections:
 
         config = Config.load()
         self.http = Http(config.metadata.contact_email)
-        self.index = Index(paths.INDEX_FILE, config.library_path)
+        self.index = Index(paths.INDEX_FILE, config.libraries())
         return self.http, self.index
 
     def __exit__(self, *exc) -> None:

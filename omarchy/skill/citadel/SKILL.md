@@ -42,6 +42,10 @@ helps - `get` returns the paths of the PDF, the Markdown and the folder.
 Papers Citadel cannot place wait in the user's review queue; `add` reports that. Settling
 review is the user's call.
 
+There may be several libraries (e.g. Personal and a work library such as SES); every result
+says which one (`library`). Never copy a paper from one into another - work material stays
+in the work library. `add` takes `library` (default: the first one).
+
 ## CLI fallback (no MCP connection)
 
 ```sh

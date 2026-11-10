@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import logging
 import re
 import shutil
 import tempfile
@@ -27,6 +28,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 from . import naming, office, paths, record, sources, standards
+from .claim import Claimer
 from .classify import Classifier
 from .config import Config
 from .identifiers import ARXIV_NEW, ARXIV_OLD, clean_doi, find_dois
@@ -45,6 +47,8 @@ COMPANION = re.compile(
     r"\b(annex|appendix|supplement(?:ary)?|attachment|addendum)\b", re.IGNORECASE
 )
 TEMPORARY_SUFFIXES = (".part", ".crdownload", ".download", ".tmp", ".partial", ".opdownload")
+
+log = logging.getLogger("citadel.ingest")
 
 
 EMPTY_PATIENCE = 15 * 60  # seconds an empty inbox file is given to fill in
@@ -95,6 +99,7 @@ class Result:
     confidence: float = 0.0
     topic: str = ""
     topic_confidence: float = 0.0
+    library: str = ""  # the library it was filed or reviewed in
 
     def as_dict(self) -> dict:
         return asdict(self)
@@ -107,6 +112,13 @@ class Ingester:
         self.http = http
         self.config = config
         self.classifier = Classifier(library.topics())
+        self._claimer: Claimer | None = None
+
+    @property
+    def claimer(self) -> Claimer:
+        if self._claimer is None:  # asks findmnt which filesystem the inbox is on
+            self._claimer = Claimer(self.library.inbox)
+        return self._claimer
 
     # -- the inbox ---------------------------------------------------------------
 
@@ -131,8 +143,21 @@ class Ingester:
         return ready
 
     def process_inbox(self, dry_run: bool = False) -> list[Result]:
-        results = [self.ingest(path, dry_run=dry_run) for path in self.pending()]
-        if not dry_run and any(r.status == "filed" for r in results):
+        """File what is in the inbox. Each file is claimed first (see claim.py): a file
+        another machine claimed is left to it; what this machine claimed earlier but
+        did not finish is done first."""
+        if dry_run:
+            return [self.ingest(path, dry_run=True) for path in self.pending()]
+        results = [self.ingest(path) for path in self.claimer.leftovers()]
+        for path in self.pending():
+            claimed = self.claimer.claim(path)
+            if claimed.status == "claimed":
+                results.append(self.ingest(claimed.path))
+            elif claimed.status == "error":
+                log.warning("could not claim %s: %s", path.name, claimed.reason)
+            else:  # another machine has it, or it is still uploading
+                log.info("%s: %s %s", path.name, claimed.status, claimed.reason)
+        if any(r.status == "filed" for r in results):
             self.index.reindex()
         return results
 
@@ -154,9 +179,11 @@ class Ingester:
         topic: a topic chosen by the caller, skipping classification.
         keep_source: copy instead of move (for files outside the library)."""
         try:
-            return self._ingest(path, source, keep_source, known, topic, dry_run)
+            result = self._ingest(path, source, keep_source, known, topic, dry_run)
         except Exception as error:  # one bad file must not stop the whole inbox
-            return Result(str(path), "error", f"{type(error).__name__}: {error}")
+            result = Result(str(path), "error", f"{type(error).__name__}: {error}")
+        result.library = self.library.name
+        return result
 
     def _ingest(self, path, source, keep_source, known, chosen_topic, dry_run) -> Result:
         if path.stat().st_size == 0:
@@ -213,7 +240,8 @@ class Ingester:
             return self._review_or_report(shown, proposal, keep_source, dry_run, source)
 
         digest = sha256(path)
-        duplicate = self.index.find_sha256(digest)
+        # Duplicates are looked for in this library only: nothing crosses libraries.
+        duplicate = self.index.find_sha256(digest, self.library.name)
         if duplicate:
             proposal = Proposal(
                 path.name, f"identical to {duplicate}", digest, duplicate_of=duplicate
@@ -232,7 +260,7 @@ class Ingester:
             sources.enrich(self.http, meta)
 
         matches = []
-        if meta and meta.doi and (existing := self.index.find_doi(meta.doi)):
+        if meta and meta.doi and (existing := self.index.find_doi(meta.doi, self.library.name)):
             matches.append((existing, f"same DOI as {existing}"))
         if meta and not matches and (existing := self._same_title(meta)):
             matches.append((existing, f"same title, year and author as {existing}"))
@@ -323,7 +351,7 @@ class Ingester:
                 row["folder"],
                 row["title"],
             )
-        folder = self.index.root / row["folder"]
+        folder = self.index.path(row)
         md = folder / f"{folder.name}.md"
         _verified_copy(pdf, folder / f"{folder.name}.pdf", digest)
         if original:
@@ -382,7 +410,7 @@ class Ingester:
         key = title_key(meta.title, meta.year, author)
         if key is None:
             return None
-        for row in self.index.list():
+        for row in self.index.list(library=self.library.name):
             if title_key(row["title"], row["year"], row["first_author"]) == key:
                 return row["citekey"]
         return None
@@ -503,7 +531,7 @@ class Ingester:
                 if not match:
                     continue
                 identifier = standards.tidy(match.group(0))
-                for row in self.index.list():
+                for row in self.index.list(library=self.library.name):
                     if row["title"] == identifier or row["title"].startswith(f"{identifier}:"):
                         return row["citekey"]
         return None
@@ -519,7 +547,7 @@ class Ingester:
                 row["folder"],
                 row["title"],
             )
-        folder = self.index.root / row["folder"]
+        folder = self.index.path(row)
         attachments = folder / ATTACHMENTS
         attachments.mkdir(exist_ok=True)
         name = _free_name(attachments, path.name)
@@ -596,7 +624,7 @@ class Ingester:
         label = f"doi:{meta.doi}" if meta.doi else meta.title[:60]
         existing = (
             work.citekey
-            or (self.index.find_doi(meta.doi) if meta.doi else "")
+            or (self.index.find_doi(meta.doi, self.library.name) if meta.doi else "")
             or self._same_title(meta)
         )
         if existing:
@@ -642,6 +670,7 @@ class Ingester:
         )
 
     def _done(self, result: Result) -> Result:
+        result.library = self.library.name
         if result.status == "filed":
             self.index.reindex()
         return result
@@ -772,6 +801,7 @@ class Ingester:
             confidence,
             topic,
             1.0,
+            self.library.name,
         )
 
     def retry(self, name: str = "") -> list[Result]:
@@ -861,7 +891,7 @@ class Ingester:
         proposal = self.find_review(name)
         path = self.library.review / proposal.file
         sidecar = self.library.review / f"{proposal.file}{PROPOSAL_SUFFIX}"
-        if proposal.duplicate_of and self.index.find_sha256(proposal.sha256):
+        if proposal.duplicate_of and self.index.find_sha256(proposal.sha256, self.library.name):
             path.unlink()
             sidecar.unlink(missing_ok=True)
             return Result(str(path), "deleted", f"exact duplicate of {proposal.duplicate_of}")

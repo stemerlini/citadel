@@ -46,7 +46,7 @@ def record_path(index: Index, citekey: str) -> Path:
     row = index.get(citekey)
     if row is None:
         raise EditError(f"no reference {citekey}")
-    folder = index.root / row["folder"]
+    folder = index.path(row)
     return folder / f"{folder.name}.md"
 
 
@@ -98,7 +98,7 @@ def cycle_status(index: Index, citekey: str) -> str:
 
 def _move(index: Index, md_path: Path, topic: str) -> Path:
     folder = md_path.parent
-    target = index.root / topic / folder.name
+    target = index.library_of(folder).root / topic / folder.name  # never another library
     if target.exists():
         raise EditError(f"{topic}/{folder.name} already exists")
     target.parent.mkdir(parents=True, exist_ok=True)

@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from . import paths
+from .library import Library
 
 
 @dataclass
@@ -57,15 +58,57 @@ class ConvertConfig:
 @dataclass
 class Config:
     library: str = str(paths.DEFAULT_LIBRARY)
+    # [[libraries]] tables (name, path, optional tag); when present, `library` is unused.
+    library_entries: list[dict] = field(default_factory=list)
     obsidian: ObsidianConfig = field(default_factory=ObsidianConfig)
     ingest: IngestConfig = field(default_factory=IngestConfig)
     metadata: MetadataConfig = field(default_factory=MetadataConfig)
     access: AccessConfig = field(default_factory=AccessConfig)
     convert: ConvertConfig = field(default_factory=ConvertConfig)
 
+    def libraries(self) -> list[Library]:
+        """Every configured library, the default one (for `add`) first. CITADEL_LIBRARY
+        replaces them all with one. Missing folders are included: see available_libraries."""
+        override = os.environ.get("CITADEL_LIBRARY")
+        if override:
+            return [Library(Path(override).expanduser())]
+        entries = self.library_entries or [{"path": self.library}]
+        found: list[Library] = []
+        for entry in entries:
+            path = entry.get("path")
+            if not isinstance(path, str) or not path:
+                continue
+            library = Library(Path(path).expanduser(), str(entry.get("name") or ""))
+            if any(other.name.casefold() == library.name.casefold() for other in found):
+                continue  # names identify libraries in the index: the first one wins
+            if isinstance(entry.get("tag"), str) and entry["tag"]:
+                library.tag = entry["tag"]
+            found.append(library)
+        tags = [library.tag for library in found]
+        for library in found:  # two libraries starting with the same letter
+            if tags.count(library.tag) > 1:
+                library.tag = library.name
+        return found or [Library(paths.DEFAULT_LIBRARY)]
+
+    def available_libraries(self) -> list[Library]:
+        """The libraries whose folder is there (a work OneDrive may not be mounted)."""
+        return [library for library in self.libraries() if library.exists()]
+
+    def library_named(self, name: str) -> Library:
+        """A library by name or tag (any case); "" is the default library."""
+        libraries = self.libraries()
+        if not name:
+            return libraries[0]
+        for library in libraries:
+            if name.casefold() in (library.name.casefold(), library.tag.casefold()):
+                return library
+        known = ", ".join(library.name for library in libraries)
+        raise LookupError(f"no library {name!r} (configured: {known})")
+
     @property
     def library_path(self) -> Path:
-        return Path(os.environ.get("CITADEL_LIBRARY") or self.library).expanduser()
+        """The default library's folder."""
+        return self.libraries()[0].root
 
     @property
     def vault_path(self) -> Path | None:
@@ -90,6 +133,8 @@ class Config:
         config = cls()
         if isinstance(data.get("library"), str):
             config.library = data["library"]
+        if isinstance(data.get("libraries"), list):
+            config.library_entries = [e for e in data["libraries"] if isinstance(e, dict)]
         for name in ("obsidian", "ingest", "metadata", "access", "convert"):
             section = getattr(config, name)
             values = data.get(name)
@@ -109,6 +154,15 @@ TEMPLATE = """\
 
 # The library folder (PDFs, Markdown, figures). Syncs through OneDrive.
 library = "{library}"
+# Several libraries (say a personal one and a work one, each in its own OneDrive) are
+# searched as one; files are never copied between them. Use these instead of `library`
+# (the first is where `citadel add` files by default):
+# [[libraries]]
+# name = "Personal"
+# path = "~/OneDrive-Personal/Citadel"
+# [[libraries]]
+# name = "SES"
+# path = "~/OneDrive-SES/Citadel"
 
 [obsidian]
 # Path to your Obsidian vault. Leave empty until the vault exists.

@@ -1,6 +1,7 @@
 import json
 import os
 import time
+from pathlib import Path
 
 import pytest
 
@@ -171,7 +172,9 @@ def test_failed_copy_leaves_the_source_and_no_folder(setup, monkeypatch):
     monkeypatch.setattr(ingest_module, "_verified_copy", broken)
     [result] = ingester.process_inbox()
     assert result.status == "error" and "disk full" in result.reason
-    assert source.exists()
+    # Kept in this machine's claimed folder, and tried again on the next pass.
+    assert not source.exists() and ingester.claimer.leftovers() == [Path(result.file)]
+    assert [r.status for r in ingester.process_inbox()] == ["error"]
     refractive = library.root / "plasma-physics/diagnostics/refractive"
     assert list(refractive.iterdir()) == []
 

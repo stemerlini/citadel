@@ -88,7 +88,7 @@ class Converter:
         for row in rows:
             if not row["has_pdf"] or (row["has_fulltext"] and not force):
                 continue
-            folder = self.index.root / row["folder"]
+            folder = self.index.path(row)
             jobs.append(Job(row["citekey"], row["title"], folder, _pages(folder)))
             if limit and len(jobs) >= limit:
                 break

@@ -680,6 +680,8 @@ class DuplicatesScreen(ModalScreen[None]):
             if not m.has_pdf:
                 badges.append("[dim]no PDF[/]")
             where = "in review" if m.kind == "review" else "filed"
+            if len({x.library for x in group.members}) > 1:
+                where += f" in {escape(m.library)}"
             members.add_option(
                 Option(
                     f"[b]{escape(m.title[:70])}[/]\n"
@@ -742,13 +744,12 @@ class DuplicatesScreen(ModalScreen[None]):
         member = self.current_member()
         if member is None:
             return
-        library = self.app.library
         if member.kind == "review":
-            pdf = library.review / member.key
+            pdf = member.path
             ref = Reference(citekey="(in review)", title=member.title, year=member.year)
             self.app.push_screen(PreviewScreen(ref, pdf.parent, pdf=pdf))
         else:
-            folder = library.root / member.location
+            folder = member.path
             ref, body = record.read(folder / f"{folder.name}.md")
             self.app.push_screen(PreviewScreen(ref, folder, body=body))
 
