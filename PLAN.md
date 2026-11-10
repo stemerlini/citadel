@@ -37,7 +37,8 @@ Omarchy machines through pull requests on GitHub (`stemerlini/citadel`, private)
 | Zotero | Out of scope for now |
 | Stack | Python + Textual + textual-image (same as Toploader), SQLite index, pytest, ruff |
 | Paywalled papers | Library sign-in in Citadel's own Chromium profile (Imperial SSO now; an EZproxy prefix for libraries such as BnL). The user clicks the PDF; Citadel never drives publisher sites (2026-11-08) |
-| Maintenance | GitHub, private; every change through a pull request; the inbox watcher runs on one machine (2026-11-08) |
+| Maintenance | GitHub, private; every change through a pull request; any number of inbox watchers, each inbox file claimed atomically through omadrive (2026-11-09; was one watcher, 2026-11-08) |
+| Libraries | Several (e.g. Personal, SES on the work account), searched as one through one local index with a `library` column; files never cross libraries (2026-11-09) |
 | Environments | App: system Python 3.14 in `.venv`. Marker: its own Python 3.13 env (`.venv-convert`, via mise) run as a worker subprocess, because Marker pins `pillow<11` (no 3.14 wheel) and drags in PyTorch |
 
 ## Library layout
@@ -202,6 +203,14 @@ _inbox/file ─▶ 1 identify ─▶ 2 metadata ─▶ 3 decide ─▶ 4 file �
 **Watcher.** A systemd user service (`citadel watch`) that **polls** `_inbox/`.
 inotify does not see changes that arrive through rclone from other devices.
 
+**Claims (2026-11-09).** Before a file is ingested it is claimed: moved into
+`_inbox/.claimed/<host>/`. In a OneDrive folder omadrive knows (an rclone mount it manages) the move
+is `omadrive agent claim`, a server-side move conditional on the item's eTag, so of
+several watchers exactly one wins and the others skip the file (taken; or pending while
+it is still uploading). Elsewhere it is a local rename, safe on one machine only (a
+warning says so). A host finishes its own leftovers on restart; another host's claims older than 24 h
+are listed by `citadel doctor`, never taken over.
+
 **Other ways in:** `citadel add <pdf|doi|arxiv-id|url>`. Agents use the same call to add
 papers they find.
 
@@ -299,6 +308,22 @@ folders), then `omarchy plugin enable smerlini.citadel`.
 - Claude Code skill `omarchy/skill/citadel/SKILL.md`, linked into `~/.claude/skills/citadel`:
   library first, read from Markdown, web only for gaps (offer `add`), cite `[@citekey]`.
 - `library.bib` in the library root (sorted, rewritten only on change; watcher + `citadel bib`).
+  With several libraries each keeps its own `library.bib` (its own references only, so a
+  work bibliography never lands in the personal OneDrive); `citadel bib --output FILE`
+  writes one combined file.
+
+### Several libraries (2026-11-09)
+
+- Config: `[[libraries]]` entries (`name`, `path`); a plain `library = …` is one library
+  named after its OneDrive folder (`OneDrive-Personal` → Personal). A library whose folder
+  is missing (account not mounted) is skipped and reported by `doctor`.
+- One index with a `library` column. Citekeys stay unique: on a clash the later library's
+  reference is indexed as `<key>-<library>`, reported by `doctor`.
+- Every view shows where a reference lives: the TUI tag column, `list`/`search`/`get`,
+  `--json`, the MCP results, `cite --json`. `--library NAME` filters `list`/`search`.
+- Each library has its own `_inbox/`, `_review/`, `topics.toml` and `library.bib`; a file
+  is filed only within its own library, duplicate checks stay within it, and
+  `duplicates` may show a paper in both libraries but deletes only within one.
 - Verified with a fresh headless Claude Code session: it searched Citadel unprompted, cited
   `tylka1997creme96`, and asked for conversion instead of guessing a section.
 

@@ -12,8 +12,8 @@ reaches `main` through a pull request, so any agent on any machine can pick up f
 
 ```sh
 gh repo clone stemerlini/citadel ~/Projects/citadel && cd ~/Projects/citadel
-tools/install-omarchy             # main desktop: runs the inbox watcher
-tools/install-omarchy --no-watch  # every other machine
+tools/install-omarchy             # runs the inbox watcher (safe on every machine)
+tools/install-omarchy --no-watch  # a machine that should not file inbox PDFs
 .venv/bin/pip install -q -e '.[dev]'   # pytest, ruff
 ```
 
@@ -55,7 +55,13 @@ index (`citadel reindex`) and keeps its own sign-in (`citadel login`).
 - Publisher sites: Citadel opens pages for the user to click (`access.py`). It never
   drives a publisher's site or gets around its bot checks.
 - The topic tree (`src/citadel/topics.toml`) changes only with the owner's approval.
-- One inbox watcher across all machines (`--no-watch` everywhere else).
+- Any number of inbox watchers: inbox files are claimed atomically through omadrive
+  (`omadrive agent claim`, `claim.py`) before they are filed. When the library is not
+  in a OneDrive folder omadrive knows, the claim is only a local rename, so there keep
+  one watcher (`--no-watch` elsewhere).
+- Libraries never mix: a file is filed in the library whose inbox it came from, and
+  nothing is copied, moved or deleted from one library into another (a work library
+  stays in the work account).
 
 ## Gotchas
 
@@ -68,3 +74,6 @@ index (`citadel reindex`) and keeps its own sign-in (`citadel login`).
 - The MCP server uses the mcp SDK 2.x API (`MCPServer`, formerly `FastMCP`).
 - `data/` (config, index, browser profiles, the `no-watch` marker) is per machine and
   never committed.
+- Several libraries share one index (`data/index.db`, a `library` column). A citekey that
+  clashes with one in an earlier library gets a `-<library>` suffix in the index only;
+  `citadel doctor` lists clashes. In-flight inbox files sit in `_inbox/.claimed/<host>/`.
