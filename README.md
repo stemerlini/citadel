@@ -120,7 +120,10 @@ and any `Citadel-<tag>` library already there, and asks for a tag (`personal`). 
 is `<location>/Citadel-<tag>`. **Settings** (`S`) adds more libraries, each with its own
 tag (`work`, `local`…), renames a tag (and its folder, `e`), and sets the optional
 paywall sign-in.
-Settings are saved to `data/config.toml`, comments kept. Colours follow the Omarchy
+The list opens at once from the index; Citadel then reads the library folder in the
+background. On OneDrive that can take minutes (after a rename, or on a new computer):
+references not read back yet are greyed out with `…`, and opening, editing or citing them
+waits until they are. Settings are saved to `data/config.toml`, comments kept. Colours follow the Omarchy
 theme; elsewhere Citadel uses Omarchy's default, Tokyo Night.
 
 | Key | Action | Key | Action |

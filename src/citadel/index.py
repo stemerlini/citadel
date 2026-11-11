@@ -110,8 +110,10 @@ class Index:
         self.root = self.libraries[0].root  # the default library
         self.roots = {library.name: library.root for library in self.libraries}
         file.parent.mkdir(parents=True, exist_ok=True)
-        self.conn = sqlite3.connect(file, check_same_thread=False)
+        self.conn = sqlite3.connect(file, check_same_thread=False, timeout=30)
         self.conn.row_factory = sqlite3.Row
+        # Readers (the app, MCP, the CLI) are never locked out by a long reindex.
+        self.conn.execute("PRAGMA journal_mode = WAL")
         self.conn.execute("PRAGMA foreign_keys = ON")
         version = self.conn.execute("PRAGMA user_version").fetchone()[0]
         if version not in (0, SCHEMA_VERSION):
@@ -129,9 +131,10 @@ class Index:
 
     # -- building ------------------------------------------------------------
 
-    def reindex(self, full: bool = False) -> ReindexReport:
+    def reindex(self, full: bool = False, progress=None) -> ReindexReport:
         """Bring the index in line with the files of every library. Only changed files
-        are re-read, unless full is set.
+        are re-read, unless full is set. progress(citekey) is called as each reference
+        is confirmed, and each re-read one is committed at once.
 
         A citekey is unique across libraries: when two libraries use the same one, the
         library listed first keeps it and the other reference is indexed as
@@ -162,14 +165,16 @@ class Index:
                     for key, (lib, folder, _, _) in known.items():
                         if lib == library.name:  # kept until the library is back
                             seen.setdefault(key, (lib, folder))
+                            if progress:
+                                progress(key)
                     continue
-                self._reindex_library(library, known, by_place, seen, full, report)
+                self._reindex_library(library, known, by_place, seen, full, report, progress)
             for key in known.keys() - seen.keys():
                 self._delete(key)
                 report.removed.append(key)
         return report
 
-    def _reindex_library(self, library, known, by_place, seen, full, report) -> None:
+    def _reindex_library(self, library, known, by_place, seen, full, report, progress) -> None:
         root, name = library.root, library.name
         for path in scan(root):
             folder = path.parent.relative_to(root).as_posix()
@@ -185,6 +190,8 @@ class Index:
             ):
                 seen[old_key] = (name, folder)
                 report.unchanged += 1
+                if progress:
+                    progress(old_key)
                 if old_key != known[old_key][3]:
                     report.problems.append(_clash(where, known[old_key][3], seen, old_key))
                 continue
@@ -217,6 +224,9 @@ class Index:
                 self._delete(old_key)  # citekey edited by hand
             self._store(ref, body, name, folder, topic, mtime, key)
             (report.updated if key in known else report.added).append(key)
+            if progress:
+                self.conn.commit()
+                progress(key)
 
     def add(self, md_path: Path) -> str:
         """Index one record right away (just filed), so the next file in the same batch

@@ -17,6 +17,7 @@ from textual import events, on, work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
+from textual.css.query import NoMatches
 from textual.widgets import DataTable, Footer, Input, Static, Tree
 
 from .. import __version__, cite, edit, paths, record
@@ -55,6 +56,8 @@ TYPE_VIEWS = [
     ("standard", "Standards"),
     ("report", "Reports"),
 ]
+LOADING_DELAY = 0.5  # seconds before references still loading are greyed out
+LOADING_STYLE = "dim"
 STATUS_MARKS = {"unread": ("●", "accent"), "reading": ("◐", "warning"), "read": ("✓", "")}
 # Markdown column: converted, being converted right now, waiting, nothing to convert.
 MD_MARKS = {
@@ -171,6 +174,8 @@ class Citadel(App):
         self.ingest_lock = threading.Lock()
         self.converting_key = ""  # the reference being converted right now
         self.duplicate_groups = []
+        self.duplicates_run = 0
+        self.loading: set[str] = set()  # references not yet read back from the library
 
     # -- layout ------------------------------------------------------------------------
 
@@ -222,16 +227,40 @@ class Citadel(App):
     @work(thread=True, exclusive=True, group="reindex")
     def reindex_in_background(self) -> None:
         """Catch up with the library files. On a OneDrive mount every changed record
-        is downloaded first, which may take minutes: the list stays usable meanwhile."""
+        is downloaded first, which may take minutes: the list stays usable meanwhile,
+        the references not yet read back shown greyed out."""
         if not self.available():
             return
         index = self.open_index()
+        self.loading = {row["citekey"] for row in index.list()}
+        self.call_from_thread(self.set_timer, LOADING_DELAY, self.show_loading)
+        shown = [time.monotonic()]
+
+        def confirmed(key: str) -> None:
+            self.loading.discard(key)
+            if time.monotonic() - shown[0] > 1:
+                shown[0] = time.monotonic()
+                self.call_from_thread(self.show_loading)
+
         try:
-            report = index.reindex()
+            index.reindex(progress=confirmed)
         finally:
             index.close()
-        if report.added or report.updated or report.removed:
-            self.call_from_thread(lambda: self.reload(self.current_key(), scan=False))
+            self.loading = set()
+            self.call_from_thread(self.after_reindex)
+
+    def after_reindex(self) -> None:
+        if self.is_running:
+            try:
+                self.reload(self.current_key(), scan=False)
+            except NoMatches:  # closing
+                pass
+
+    def show_loading(self) -> None:
+        """Refresh the list while references are still loading (greyed out)."""
+        if self.loading and self.is_running:
+            self.all_rows = self.index.list()
+            self.refresh_table()
 
     # -- setup: libraries and sign-in (Settings, S) ----------------------------------
 
@@ -278,7 +307,7 @@ class Citadel(App):
                     "other computers follow when Citadel starts. Nothing inside changes."
                 )
 
-                def decided(yes: bool) -> None:
+                def decided(yes: bool, library: Library = library) -> None:
                     if yes:
                         self.rename_library(library)
                     else:
@@ -309,13 +338,7 @@ class Citadel(App):
             config_module.save_libraries(
                 [{"path": str(target if lib is library else lib.root)} for lib in self.libraries]
             )
-            # Re-read the renamed library here, off screen: on OneDrive that takes a while.
-            index = Index(self.index.file, Config.load().libraries())
-            try:
-                index.reindex()
-            finally:
-                index.close()
-        self.call_from_thread(self.apply_config)
+        self.call_from_thread(self.apply_config)  # re-reads it in the background
         self.call_from_thread(self.notify, f"Library folder is now {target}.")
         if after:
             self.call_from_thread(after)
@@ -336,8 +359,9 @@ class Citadel(App):
         file = self.index.file
         self.index.close()
         self.index = Index(file, self.libraries)
-        self.reload()
+        self.reload(scan=False)
         self.refresh_signin()
+        self.reindex_in_background()
 
     def action_settings(self) -> None:
         from .settings import SettingsScreen
@@ -404,7 +428,7 @@ class Citadel(App):
         if scan and self.available():
             self.index.reindex()
         self.all_rows = self.index.list()
-        self.duplicate_groups = self.find_duplicates()
+        self.refresh_duplicates()
         self.refresh_stats()
         self.refresh_tree()
         self.refresh_table(keep)
@@ -547,6 +571,9 @@ class Citadel(App):
         else:
             table.clear()
         for row in self.rows:
+            if row["citekey"] in self.loading:
+                table.add_row(*self.loading_cells(row, layout), key=row["citekey"])
+                continue
             mark, color = STATUS_MARKS.get(row["status"], (" ", ""))
             cells = {
                 "status": Text(mark, style=f"bold {self.tones[color]}" if color else "dim"),
@@ -567,6 +594,20 @@ class Citadel(App):
         if keep and keep in {r["citekey"] for r in self.rows}:
             table.move_cursor(row=table.get_row_index(keep))
         self.refresh_details()
+
+    def loading_cells(self, row: dict, layout: dict) -> list[Text]:
+        """A reference not read back from its library yet: greyed out."""
+        cells = {
+            "status": "…",
+            "library": self.library_tag(row["library"]).plain,
+            "year": str(row["year"] or ""),
+            "title": clip(row["title"], layout["title"]),
+            "author": clip(row["first_author"], layout.get("author", 16)),
+            "type": row["type"],
+            "topic": clip(row["topic"], layout.get("topic", 24)),
+            "md": "",
+        }
+        return [Text(cells[k], style=LOADING_STYLE) for k in layout]
 
     def markdown_state(self, row: dict) -> str:
         if row["has_fulltext"]:
@@ -634,7 +675,12 @@ class Citadel(App):
             text.append_text(highlight(snippet, f"bold {self.tones['accent']}"))
         elif data.get("abstract"):
             text.append("\n" + clip(data["abstract"], 400), style="dim")
-        if not row["has_pdf"]:
+        if row["citekey"] in self.loading:
+            text.append(
+                "\nNot available yet: still loading from the library folder",
+                style=LOADING_STYLE,
+            )
+        elif not row["has_pdf"]:
             text.append(
                 "\nNo PDF yet: w publisher page · g Google · then drop the PDF in "
                 "the inbox, it is attached here",
@@ -705,6 +751,8 @@ class Citadel(App):
         }
         if action in needs_row and self.current_key() is None:
             return False
+        if action in needs_row - {"references", "web"} and self.current_key() in self.loading:
+            return None  # shown disabled until it has loaded
         return True
 
     def selected(self):
@@ -944,14 +992,32 @@ class Citadel(App):
         if isinstance(self.screen, ReviewScreen):
             self.screen.refresh_items(items)
 
-    def find_duplicates(self):
+    def refresh_duplicates(self) -> None:
+        self.duplicates_run += 1
+        self.find_duplicates(self.duplicates_run)
+
+    @work(thread=True, group="duplicates")
+    def find_duplicates(self, run: int) -> None:
+        """Look for duplicates off screen: it lists the review folders on the drive."""
         from .. import duplicates
 
+        available = self.available()
+        index = self.open_index()
         try:
-            available = self.available()
-            return duplicates.find(self.index, available) if available else []
+            groups = duplicates.find(index, available) if available else []
         except OSError:
-            return []
+            groups = []
+        finally:
+            index.close()
+        self.call_from_thread(self.show_duplicates, groups, run)
+
+    def show_duplicates(self, groups, run: int) -> None:
+        if run != self.duplicates_run or not self.is_running:
+            return  # a newer check is on its way, or the app is closing
+        self.duplicate_groups = groups
+        self.refresh_stats()
+        if isinstance(self.screen, DuplicatesScreen):
+            self.screen.refresh_groups(groups)
 
     def action_duplicates(self) -> None:
         self.push_screen(DuplicatesScreen(self.duplicate_groups, self.resolve_duplicates))
@@ -985,9 +1051,7 @@ class Citadel(App):
         self.call_from_thread(self.after_duplicates)
 
     def after_duplicates(self) -> None:
-        self.reload()
-        if isinstance(self.screen, DuplicatesScreen):
-            self.screen.refresh_groups(self.duplicate_groups)
+        self.reload()  # the duplicates screen follows when they are found again
 
     def action_web(self, google: bool) -> None:
         """The paper online: publisher page (w) or a Google search (g), through the

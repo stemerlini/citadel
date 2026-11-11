@@ -77,7 +77,6 @@ def find(index: Index, libraries: Library | list[Library]) -> list[Group]:
 
     for row in index.list():
         data = index.get(row["citekey"])["data"]
-        folder = index.path(row)
         member = Member(
             "reference",
             row["citekey"],
@@ -87,7 +86,7 @@ def find(index: Index, libraries: Library | list[Library]) -> list[Group]:
             row["folder"],
             bool(row["has_pdf"]),
             bool(row["has_fulltext"]),
-            _has_notes(folder),
+            False,  # read below, only for the references that turn out to be duplicates
             len(data.get("attachments") or []),
             row["added"],
             row["library"],
@@ -162,6 +161,10 @@ def find(index: Index, libraries: Library | list[Library]) -> list[Group]:
         LOCAL_IGNORED
     )
     found_groups = [g for g in groups.values() if len(g.members) > 1 and g.id not in ignored]
+    for group in found_groups:
+        for m in group.members:
+            if m.kind == "reference":
+                m.has_notes = _has_notes(m.path)
     for group in found_groups:  # filed copies first, the best-kept copy first among them
         group.members.sort(
             key=lambda m: (
