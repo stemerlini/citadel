@@ -81,7 +81,7 @@ def update(index: Index, citekey: str, topics: set[str] | None = None, **changes
         path = _move(index, path, new_topic)
         ref.topic = new_topic
     record.update_metadata(path, ref)
-    index.reindex()
+    index.add(path)  # just this record: a whole reindex reads every file in the library
     return ref
 
 
