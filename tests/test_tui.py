@@ -226,6 +226,9 @@ async def test_duplicates_screen_keep_and_ignore(make_app):
     )
     calls = []
     async with app.run_test(size=(140, 40)) as pilot:
+        for _ in range(3):  # the start-up reindex, then its duplicate check
+            await app.workers.wait_for_complete()
+            await pilot.pause()
         app.push_screen(DuplicatesScreen([group], lambda *args: calls.append(args)))
         await pilot.pause()
         await pilot.press("down", "enter")  # keep the copy in review
@@ -472,3 +475,32 @@ async def test_opens_at_once_and_catches_up_with_the_library_in_the_background(m
         await app.workers.wait_for_complete()
         await pilot.pause()
         assert "late2024arrival" in {row["citekey"] for row in app.rows}
+
+
+async def test_references_still_loading_are_greyed_out_until_read(make_app, monkeypatch):
+    import threading
+
+    from citadel.index import Index
+    from citadel.tui.app import LOADING_STYLE
+
+    release, real = threading.Event(), Index.reindex
+
+    def slow(self, full=False, progress=None):  # a OneDrive that takes its time
+        if threading.current_thread() is not threading.main_thread():
+            release.wait(10)
+        return real(self, full, progress)
+
+    monkeypatch.setattr(Index, "reindex", slow)
+    app, _ = make_app()
+    async with app.run_test(size=(140, 40)) as pilot:
+        await pilot.pause(0.8)
+        table = app.query_one("#refs")
+        title = list(app._layout).index("title")
+        assert app.loading and table.get_row_at(0)[title].style == LOADING_STYLE
+        assert app.check_action("open_pdf", ()) is None  # disabled while loading
+        assert "Not available yet" in str(app.query_one("#details").render())
+        release.set()
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        assert not app.loading and table.get_row_at(0)[title].style != LOADING_STYLE
+        assert app.check_action("open_pdf", ()) is True
