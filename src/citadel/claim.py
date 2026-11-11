@@ -348,3 +348,44 @@ def _free_name(folder: Path, name: str) -> str:
         candidate = f"{stem} ({number}){suffix}"
         number += 1
     return candidate
+
+
+def rename_folder(folder: Path, name: str, claimer: Claimer | None = None) -> Path:
+    """Rename a library folder in place (Citadel to Citadel-personal). On an rclone mount
+    of OneDrive the rename is made on OneDrive, guarded by the folder's eTag and failing
+    if the name is taken, then the mount is refreshed; elsewhere it is a local rename.
+    Refuses while files in the folder are still uploading."""
+    target = folder.with_name(name)
+    if target.exists():
+        raise FileExistsError(f"{target} already exists")
+    claimer = claimer or Claimer(folder / "_inbox")
+    if claimer.backend != "onedrive":
+        os.rename(folder, target)
+        return target
+    mount = claimer.mount
+    inside = folder.relative_to(mount.mountpoint).as_posix() + "/"
+    queue = (claimer._rc("vfs/queue", fs=mount.fs()) or {}).get("queue") or []
+    if any(str(entry.get("name", "")).startswith(inside) for entry in queue):
+        raise OSError("files in it are still uploading to OneDrive: try again in a minute")
+    claimer.graph.sign_in()
+    status, item = claimer.graph.call("GET", _item(mount.drive_path(folder)), "$select=id,eTag")
+    if status != 200:
+        raise OSError(f"OneDrive answered {status} for {mount.drive_path(folder)}")
+    status, _ = claimer.graph.call(
+        "PATCH",
+        f"items/{item['id']}",
+        "@microsoft.graph.conflictBehavior=fail",
+        {"name": name},
+        if_match=item["eTag"],
+    )
+    if status == 412:
+        raise OSError("it changed on OneDrive meanwhile: try again")
+    if status not in (200, 201):
+        raise OSError(f"OneDrive answered {status} renaming {mount.drive_path(folder)}")
+    claimer._refresh(folder)
+    deadline = time.monotonic() + (30 if mount.rc else 120)
+    while not target.is_dir() and time.monotonic() < deadline:
+        time.sleep(2)
+    if not target.is_dir():
+        raise OSError(f"renamed on OneDrive; {target} will appear once the mount refreshes")
+    return target

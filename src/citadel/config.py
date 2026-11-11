@@ -12,8 +12,10 @@ import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import tomlkit
+
 from . import paths
-from .library import Library
+from .library import Library, standard_folder
 
 
 @dataclass
@@ -79,7 +81,12 @@ class Config:
             path = entry.get("path")
             if not isinstance(path, str) or not path:
                 continue
-            library = Library(Path(path).expanduser(), str(entry.get("name") or ""))
+            root = Path(path).expanduser()
+            library = Library(root, str(entry.get("name") or ""))
+            renamed = standard_folder(root, library.name)
+            if not root.exists() and renamed.is_dir():
+                # Renamed to Citadel-<tag> on another machine: follow it.
+                library = Library(renamed)
             if any(other.name.casefold() == library.name.casefold() for other in found):
                 continue  # names identify libraries in the index: the first one wins
             if isinstance(entry.get("tag"), str) and entry["tag"]:
@@ -151,19 +158,19 @@ class Config:
 
 
 TEMPLATE = """\
-# Citadel settings. Edit freely: Citadel never rewrites this file.
+# Citadel settings. Edit freely: the app changes only what you set in its Settings
+# (S): the libraries and the sign-in. Comments are kept.
 
 # The library folder (PDFs, Markdown, figures). Syncs through OneDrive.
 library = "{library}"
 # Several libraries (say a personal one and a work one, each in its own OneDrive) are
 # searched as one; files are never copied between them. Use these instead of `library`
-# (the first is where `citadel add` files by default):
+# (the first is where `citadel add` files by default). A library folder is called
+# Citadel-<tag>, and the tag (personal, work…) names it; Settings (S) in the app does this:
 # [[libraries]]
-# name = "Personal"
-# path = "~/OneDrive-Personal/Citadel"
+# path = "~/OneDrive-Personal/Citadel-personal"
 # [[libraries]]
-# name = "SES"
-# path = "~/OneDrive-SES/Citadel"
+# path = "~/OneDrive-Work/Citadel-work"
 
 [obsidian]
 # Path to your Obsidian vault. Leave empty until the vault exists.
@@ -221,3 +228,58 @@ def write_default(file: Path | None = None, library: Path | None = None) -> bool
     file.parent.mkdir(parents=True, exist_ok=True)
     file.write_text(TEMPLATE.format(library=library or paths.DEFAULT_LIBRARY))
     return True
+
+
+def _document(file: Path) -> tomlkit.TOMLDocument:
+    if file.exists():
+        return tomlkit.parse(file.read_text())
+    return tomlkit.parse(TEMPLATE.format(library=paths.DEFAULT_LIBRARY))
+
+
+def _save(document: tomlkit.TOMLDocument, file: Path) -> None:
+    file.parent.mkdir(parents=True, exist_ok=True)
+    temporary = file.with_name(f".{file.name}.tmp")
+    temporary.write_text(tomlkit.dumps(document))
+    temporary.replace(file)
+
+
+def _home_relative(path: str) -> str:
+    resolved = Path(path).expanduser()
+    try:
+        return "~/" + resolved.relative_to(Path.home()).as_posix()
+    except ValueError:
+        return str(resolved)
+
+
+def save_libraries(entries: list[dict], file: Path | None = None) -> None:
+    """Write the libraries chosen in the app as [[libraries]], in order: the first is the
+    default. A Citadel-<tag> folder names itself, so only its path is written. The rest of
+    the file, comments included, is kept."""
+    file = file or paths.CONFIG_FILE
+    document = _document(file)
+    tables = tomlkit.aot()
+    for entry in entries:
+        table = tomlkit.table()
+        if entry.get("name"):
+            table["name"] = entry["name"]
+        table["path"] = _home_relative(entry["path"])
+        tables.append(table)
+    if entries:
+        document["library"] = _home_relative(entries[0]["path"])
+    document["libraries"] = tables
+    _save(document, file)
+
+
+def save_access(
+    name: str, login_url: str, proxy: str = "", browser: str = "", file: Path | None = None
+) -> None:
+    """Write the library sign-in set in the app; an empty name turns it off."""
+    file = file or paths.CONFIG_FILE
+    document = _document(file)
+    if "access" not in document:
+        document["access"] = tomlkit.table()
+    section = document["access"]
+    section["name"], section["login_url"], section["proxy"] = name, login_url, proxy
+    if browser:
+        section["browser"] = browser
+    _save(document, file)

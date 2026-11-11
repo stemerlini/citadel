@@ -383,6 +383,88 @@ async def test_w_and_g_open_the_paper_online(make_app, monkeypatch):
         assert "No PDF yet" in str(app.query_one("#details").render())
 
 
+async def test_first_run_asks_where_and_makes_citadel_personal(tmp_path, config_file, monkeypatch):
+    from textual.widgets import Input
+
+    from citadel.tui.settings import LibraryForm
+
+    monkeypatch.delenv("CITADEL_LIBRARY", raising=False)
+    (tmp_path / "OneDrive").mkdir()
+    (tmp_path / "OneDrive" / "notes.txt").write_text("synced")
+    app = Citadel(index=Index(tmp_path / "index.db", tmp_path / "none"), setup=True)
+    async with app.run_test(size=(140, 40)) as pilot:
+        await pilot.pause()
+        form = app.screen
+        assert isinstance(form, LibraryForm)
+        form.query_one("#lib-location", Input).value = str(tmp_path / "OneDrive")
+        form.submit()
+        await pilot.pause()
+        assert (app.library.name, app.library.tag) == ("personal", "p")
+        assert (tmp_path / "OneDrive" / "Citadel-personal" / "_inbox").is_dir()
+    assert "Citadel-personal" in config_file.read_text()
+
+
+async def test_settings_add_a_work_library_and_the_sign_in(
+    make_app, tmp_path, config_file, monkeypatch
+):
+    from textual.widgets import Input
+
+    from citadel.tui.settings import AccessForm, LibraryForm, SettingsScreen
+
+    monkeypatch.delenv("CITADEL_LIBRARY", raising=False)
+    (tmp_path / "work").mkdir()
+    (tmp_path / "work" / "x").write_text("")
+    app, _ = make_app()
+    async with app.run_test(size=(140, 40)) as pilot:
+        await pilot.press("S", "a")
+        await pilot.pause()
+        form = app.screen
+        assert isinstance(form, LibraryForm)
+        form.query_one("#lib-location", Input).value = str(tmp_path / "work")
+        form.query_one("#lib-tag", Input).value = "Library"  # "l": the first one's letter
+        form.submit()
+        await pilot.pause()
+        assert app.screen is form  # refused
+        form.query_one("#lib-tag", Input).value = "Work"
+        form.submit()
+        await pilot.pause()
+        assert isinstance(app.screen, SettingsScreen)
+        assert [(lib.name, lib.tag) for lib in app.libraries][1] == ("work", "w")
+        assert (tmp_path / "work" / "Citadel-work" / "_inbox").is_dir()
+        await pilot.press("escape")
+        await pilot.click("#signin")  # off: the button opens the sign-in setup
+        await pilot.pause()
+        assert isinstance(app.screen, AccessForm)
+        app.screen.query_one("#access-name", Input).value = "imperial"
+        app.screen.query_one("#access-login_url", Input).value = "https://library.example/"
+        app.screen.action_save()
+        await pilot.pause()
+        assert app.config.access.name == "imperial"
+
+
+async def test_an_old_library_folder_is_renamed_citadel_tag(tmp_path, config_file, monkeypatch):
+    from citadel.config import save_libraries
+    from citadel.tui.screens import ConfirmScreen
+
+    monkeypatch.delenv("CITADEL_LIBRARY", raising=False)
+    old = tmp_path / "OneDrive-Personal" / "Citadel"
+    Library(old).init()
+    file_ref(old, make_ref(), "The Kolmogorov cascade in a plasma.")
+    save_libraries([{"path": str(old)}])
+    app = Citadel(index=Index(tmp_path / "index.db", Config.load().libraries()), setup=False)
+    app.config = Config.load()
+    async with app.run_test(size=(140, 40)) as pilot:
+        await pilot.pause()
+        assert isinstance(app.screen, ConfirmScreen)
+        await pilot.press("y")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        assert not old.exists() and (old.parent / "Citadel-personal" / "topics.toml").is_file()
+        assert (app.library.name, app.library.tag) == ("personal", "p")
+        assert [r["citekey"] for r in app.rows] == ["verma2004statistical"]
+    assert "Citadel-personal" in config_file.read_text()
+
+
 async def test_opens_at_once_and_catches_up_with_the_library_in_the_background(make_app, tmp_path):
     app, _ = make_app()
     file_ref(tmp_path / "lib", make_ref(citekey="late2024arrival", title="A late arrival"))

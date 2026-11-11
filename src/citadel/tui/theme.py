@@ -1,4 +1,5 @@
-"""Build a Textual theme from the active Omarchy theme, if there is one (as in Toploader)."""
+"""The app's colours: the active Omarchy theme when there is one (as in Toploader),
+else Citadel's own, in the colours of Omarchy's default theme (Tokyo Night)."""
 
 from __future__ import annotations
 
@@ -12,12 +13,16 @@ COLORS = Path.home() / ".local/state/omarchy/current/theme/colors.toml"
 
 def omarchy_theme() -> Theme | None:
     try:
-        c = tomllib.loads(COLORS.read_text())
+        colors = tomllib.loads(COLORS.read_text())
     except (OSError, ValueError):
         return None
+    return _theme("omarchy", colors)
+
+
+def _theme(name: str, c: dict) -> Theme | None:
     try:
         return Theme(
-            name="omarchy",
+            name=name,
             dark=c.get("mode", "dark") != "light",
             primary=c.get("accent") or c["blue"],
             secondary=c.get("magenta"),
@@ -32,3 +37,23 @@ def omarchy_theme() -> Theme | None:
         )
     except KeyError:
         return None
+
+
+# Omarchy's default theme, Tokyo Night, for machines without Omarchy (Ubuntu…).
+DEFAULT_COLORS = {
+    "mode": "dark",
+    "accent": "#7aa2f7",
+    "magenta": "#ad8ee6",
+    "cyan": "#449dab",
+    "yellow": "#e0af68",
+    "red": "#f7768e",
+    "green": "#9ece6a",
+    "foreground": "#a9b1d6",
+    "background": "#1a1b26",
+    "lighter_background": "#24283b",
+    "dark_background": "#13141c",
+}
+
+
+def app_theme() -> Theme:
+    return omarchy_theme() or _theme("citadel", DEFAULT_COLORS)

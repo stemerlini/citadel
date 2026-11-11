@@ -28,8 +28,8 @@ def test_libraries_from_config(tmp_path, monkeypatch):
         }
     )
     assert [(lib.name, lib.tag) for lib in config.libraries()] == [
-        ("Personal", "P"),
-        ("SES", "SES"),
+        ("Personal", "p"),
+        ("SES", "s"),
     ]
     assert [lib.name for lib in config.available_libraries()] == ["Personal"]
     assert config.library_path == tmp_path / "p"
@@ -91,7 +91,7 @@ def test_inbox_files_stay_in_their_own_library(tmp_path, monkeypatch):
     index.close()
 
 
-def test_init_leaves_an_unmounted_onedrive_alone(tmp_path, monkeypatch, capsys):
+def test_init_leaves_an_unmounted_onedrive_alone(tmp_path, config_file, monkeypatch, capsys):
     import pytest
 
     from citadel.__main__ import main
@@ -103,3 +103,23 @@ def test_init_leaves_an_unmounted_onedrive_alone(tmp_path, monkeypatch, capsys):
         main(["init", "--library", str(mountpoint / "Citadel")])
     assert "not mounted" in capsys.readouterr().out
     assert not any(mountpoint.iterdir())
+
+
+def test_a_library_is_named_by_its_folder_and_followed_when_renamed(tmp_path, monkeypatch):
+    monkeypatch.delenv("CITADEL_LIBRARY", raising=False)
+    (tmp_path / "OneDrive-Personal" / "Citadel-work").mkdir(parents=True)
+    config = Config.from_dict(
+        {
+            "libraries": [
+                # renamed to Citadel-personal on another computer
+                {"path": str(tmp_path / "OneDrive-Personal" / "Citadel")},
+                {"name": "ignored", "path": str(tmp_path / "OneDrive-Personal" / "Citadel-work")},
+            ]
+        }
+    )
+    (tmp_path / "OneDrive-Personal" / "Citadel-personal").mkdir()
+    libraries = config.libraries()
+    assert [(lib.name, lib.tag, lib.root.name) for lib in libraries] == [
+        ("personal", "p", "Citadel-personal"),
+        ("work", "w", "Citadel-work"),
+    ]

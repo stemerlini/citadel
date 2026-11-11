@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 import shutil
 import subprocess
@@ -12,13 +13,14 @@ from pathlib import Path
 
 from rich.markup import escape
 from rich.text import Text
-from textual import on, work
+from textual import events, on, work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.widgets import DataTable, Footer, Input, Static, Tree
 
 from .. import __version__, cite, edit, paths, record
+from .. import config as config_module
 from .. import status as status_module
 from ..config import Config
 from ..index import Index
@@ -27,6 +29,7 @@ from . import logo
 from .fields import Field
 from .screens import (
     AboutScreen,
+    ConfirmScreen,
     DuplicatesScreen,
     EditScreen,
     PreviewScreen,
@@ -35,7 +38,7 @@ from .screens import (
     TopicPicker,
     open_externally,
 )
-from .theme import omarchy_theme
+from .theme import app_theme
 
 VIEWS = [
     ("all", "All references"),
@@ -137,14 +140,24 @@ class Citadel(App):
         Binding("w", "web(False)", "Web", show=False),
         Binding("g", "web(True)", "Google", show=False),
         Binding("L", "login", "Sign in", show=False),
+        Binding("S", "settings", "Settings"),
         Binding("D", "duplicates", "Duplicates", show=False),
         Binding("tab", "focus_next", "Switch pane", show=False),
         Binding("question_mark", "about", "About", key_display="?"),
         Binding("q", "quit", "Quit"),
     ]
 
-    def __init__(self, config: Config | None = None, index: Index | None = None) -> None:
+    def __init__(
+        self, config: Config | None = None, index: Index | None = None, setup: bool | None = None
+    ) -> None:
+        """setup: open with the welcome (choose the library folder); by default when there
+        is no config file yet."""
         super().__init__()
+        if setup is None:
+            setup = config is None and not (
+                paths.CONFIG_FILE.exists() or os.environ.get("CITADEL_LIBRARY")
+            )
+        self.needs_setup = setup
         self.config = config or Config.load()
         self.libraries = self.config.libraries()
         self.library = self.libraries[0]  # where the TUI adds and reviews
@@ -169,6 +182,7 @@ class Citadel(App):
                 yield Static("reference library", id="brand-tagline")
             yield Static(id="activity")
             yield Static(id="stats")
+            yield Static(id="signin")
         with Horizontal(id="body"):
             with Vertical(id="sidebar"):
                 yield Static("LIBRARY", classes="pane-title")
@@ -185,10 +199,9 @@ class Citadel(App):
         yield Footer()
 
     def on_mount(self) -> None:
-        theme = omarchy_theme()
-        if theme:
-            self.register_theme(theme)
-            self.theme = theme.name
+        theme = app_theme()
+        self.register_theme(theme)
+        self.theme = theme.name
         self.query_one("#search").display = False
         variables = self.get_css_variables()
         self.tones = {
@@ -198,9 +211,13 @@ class Citadel(App):
         tree.show_root = False
         tree.guide_depth = 2
         self.reload(scan=False)  # what the index already knows, at once
+        self.refresh_signin()
         self.query_one("#refs", DataTable).focus()
         self.set_interval(1.5, self.refresh_activity)
-        self.reindex_in_background()
+        if self.needs_setup:
+            self.welcome()
+        elif not self.offer_standard_names():
+            self.reindex_in_background()
 
     @work(thread=True, exclusive=True, group="reindex")
     def reindex_in_background(self) -> None:
@@ -215,6 +232,153 @@ class Citadel(App):
             index.close()
         if report.added or report.updated or report.removed:
             self.call_from_thread(lambda: self.reload(self.current_key(), scan=False))
+
+    # -- setup: libraries and sign-in (Settings, S) ----------------------------------
+
+    def welcome(self) -> None:
+        from .settings import LibraryForm
+
+        def chosen(result: dict | None) -> None:
+            if result is None:
+                self.exit(message="Citadel needs a library folder: run it again to choose one.")
+                return
+            self.needs_setup = False
+            self.save_libraries([{"path": result["path"]}])
+            self.notify(
+                f"Library ready: drop PDFs into {result['path']}/_inbox and press i. "
+                "More folders, and the paywall sign-in, in Settings (S).",
+                timeout=10,
+            )
+
+        self.push_screen(
+            LibraryForm(
+                "Welcome to Citadel",
+                tag="personal",
+                hint="Choose where your library lives: on OneDrive (or another synced drive) "
+                "to have it on every computer, or on this computer only. Citadel keeps it in "
+                "a folder named after its tag, Citadel-personal.",
+            ),
+            chosen,
+        )
+
+    def offer_standard_names(self) -> bool:
+        """A library folder with an older name (Citadel): offer to rename it Citadel-<tag>."""
+        import os
+
+        from ..library import standard_folder
+
+        if os.environ.get("CITADEL_LIBRARY") or not paths.CONFIG_FILE.is_file():
+            return False  # not from the config file, so there is nothing to point at the new name
+        for library in self.libraries:
+            target = standard_folder(library.root, library.name)
+            if target != library.root and library.root.is_dir():
+                question = (
+                    f"Library folders are now named after their tag. Rename "
+                    f"{library.root} to {target.name}? On OneDrive it is renamed there, and "
+                    "other computers follow when Citadel starts. Nothing inside changes."
+                )
+
+                def decided(yes: bool) -> None:
+                    if yes:
+                        self.rename_library(library)
+                    else:
+                        self.reindex_in_background()
+
+                self.push_screen(
+                    ConfirmScreen(question),
+                    decided,
+                )
+                return True  # one at a time; the next is offered at the next start
+        return False
+
+    @work(thread=True, group="ingest")
+    def rename_library(self, library: Library, tag: str = "", after=None) -> None:
+        """Rename a library's folder to Citadel-<tag> and point the config at it."""
+        from ..claim import rename_folder
+        from ..library import folder_name
+
+        name = folder_name(tag or library.name)
+        with self.ingest_lock:
+            try:
+                target = rename_folder(library.root, name)
+            except OSError as error:
+                self.call_from_thread(
+                    self.notify, f"Could not rename {library.root.name}: {error}", severity="error"
+                )
+                return
+            config_module.save_libraries(
+                [{"path": str(target if lib is library else lib.root)} for lib in self.libraries]
+            )
+            # Re-read the renamed library here, off screen: on OneDrive that takes a while.
+            index = Index(self.index.file, Config.load().libraries())
+            try:
+                index.reindex()
+            finally:
+                index.close()
+        self.call_from_thread(self.apply_config)
+        self.call_from_thread(self.notify, f"Library folder is now {target}.")
+        if after:
+            self.call_from_thread(after)
+
+    def save_libraries(self, entries: list[dict]) -> None:
+        """Write the libraries to the config, create missing folders, and switch to them."""
+        config_module.save_libraries(entries)
+        for entry in entries:
+            library = Library(Path(entry["path"]))
+            if library.root.parent.is_dir() and not library.unmounted():
+                library.init()
+        self.apply_config()
+
+    def apply_config(self) -> None:
+        self.config = Config.load()
+        self.libraries = self.config.libraries()
+        self.library = self.libraries[0]
+        file = self.index.file
+        self.index.close()
+        self.index = Index(file, self.libraries)
+        self.reload()
+        self.refresh_signin()
+
+    def action_settings(self) -> None:
+        from .settings import SettingsScreen
+
+        self.push_screen(SettingsScreen())
+
+    def action_setup_access(self, after=None) -> None:
+        from .settings import AccessForm
+
+        access = self.config.access
+
+        def saved(values: dict | None) -> None:
+            if values is None:
+                return
+            config_module.save_access(**values)
+            self.apply_config()
+            if values["name"]:
+                self.notify("Sign-in set: click 🔑 in the top bar (or press L) to sign in.")
+            else:
+                self.notify("Sign-in turned off.")
+            if after:
+                after()
+
+        self.push_screen(
+            AccessForm(access.name, access.login_url, access.proxy, access.browser), saved
+        )
+
+    def refresh_signin(self) -> None:
+        name = self.config.access.name
+        self.query_one("#signin", Static).update(
+            f"🔑 [b]{escape(name)}[/]" if name else "[dim]🔑 sign in[/]"
+        )
+        self.query_one("#signin", Static).tooltip = (
+            f"Sign in to {name} for paywalled papers (L)"
+            if name
+            else "Set up a library sign-in for paywalled papers (optional)"
+        )
+
+    @on(events.Click, "#signin")
+    def signin_clicked(self) -> None:
+        self.action_login()
 
     # -- data -> widgets ---------------------------------------------------------------
 
@@ -845,9 +1009,7 @@ class Citadel(App):
         from .. import access
 
         if not access.enabled(self.config.access):
-            self.notify(
-                "No library sign-in set: fill in [access] in the config.", severity="warning"
-            )
+            self.action_setup_access()
             return
         if access.login(self.config.access, self.library.inbox):
             self.notify(

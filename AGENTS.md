@@ -45,7 +45,7 @@ index (`citadel reindex`) and keeps its own sign-in (`citadel login`).
 
 ## Guardrails: the library is the user's data
 
-- The library on OneDrive (`~/Cloud/Personal-OneDrive/Citadel`) is real. Change it only
+- The library on OneDrive (`~/OneDrive-Personal/Citadel-personal`) is real. Change it only
   through Citadel's own code paths, and never from tests or trials (step 2).
 - The old `Library/` folder is migrated by copying; it is never moved or edited.
 - Deletions go to the OneDrive recycle bin, as `duplicates.py` does; keep it that way.
