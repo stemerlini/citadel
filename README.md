@@ -7,7 +7,8 @@ A reference library for scientists, in the terminal: a keyboard-driven Mendeley 
 
 - **Drop it in the inbox, it gets filed.** PDFs (and slides, standards, theses) are
   identified from their DOI, arXiv id or text through Crossref, OpenAlex and arXiv,
-  renamed, and filed under a topic folder. Anything uncertain waits in a review queue.
+  renamed, and filed under a topic folder. Anything uncertain waits in a review queue;
+  with `review_all = true` in `[ingest]` everything does, until you accept it.
 - **Cite without leaving the keyboard.** Stable citekeys, formatted references, BibTeX
   and a `library.bib` for LaTeX and Pandoc.
 - **Read it as text.** PDFs become Markdown with equations and figures (Marker, on the
@@ -76,7 +77,9 @@ gh repo clone stemerlini/citadel ~/Projects/citadel
 citadel reindex   # builds this machine's index from the library
 ```
 
-Elsewhere, with [uv](https://docs.astral.sh/uv/) and access to this repository:
+On Ubuntu or another Linux without Omarchy, an agent can follow
+[INSTALL-LINUX.md](INSTALL-LINUX.md) step by step. In short, with
+[uv](https://docs.astral.sh/uv/) and access to this repository:
 
 ```sh
 uv tool install git+https://github.com/stemerlini/citadel   # `uv tool upgrade citadel` later
@@ -127,7 +130,7 @@ theme; elsewhere Citadel uses Omarchy's default, Tokyo Night.
 | `c` / `b` / `k` | copy the reference / BibTeX / citekey | `r` | unread → reading → read |
 | `e` | edit metadata (`Ctrl+S` saves) | `t` | move to another topic |
 | `m` | convert to Markdown (GPU) | `a` | add a PDF, `doi:…` or `arxiv:…` |
-| `i` | review queue (`a` accept, `t` other topic, `d` DOI, `x` reject, `v` mark, `R` retry) | `D` | duplicates: keep one copy |
+| `i` | read the inbox, then the review queue (`a` accept, `t` other topic, `d` DOI, `x` reject, `v` mark, `R` retry) | `D` | duplicates: keep one copy |
 | `f` | citation tree: references / cited by, step in (`Enter`) and back (`←`), `a` add | | |
 | `w` | open the publisher page (DOI) | `g` | Google search for the paper |
 | `L` / 🔑 | sign in to your library (paywalled papers) | `S` | settings: libraries, sign-in |

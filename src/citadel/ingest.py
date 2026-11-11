@@ -122,8 +122,9 @@ class Ingester:
 
     # -- the inbox ---------------------------------------------------------------
 
-    def pending(self) -> list[Path]:
-        """Inbox files ready to process: not hidden, not temporary, not still changing."""
+    def pending(self, settle: float | None = None) -> list[Path]:
+        """Inbox files ready to process: not hidden, not temporary, not still changing
+        for `settle` seconds (default: the configured settle_seconds)."""
         if not self.library.inbox.is_dir():
             return []
         now = time.time()
@@ -134,7 +135,9 @@ class Ingester:
             if path.name.lower().endswith(TEMPORARY_SUFFIXES):
                 continue
             stat = path.stat()
-            if now - stat.st_mtime < self.config.ingest.settle_seconds:
+            if now - stat.st_mtime < (
+                self.config.ingest.settle_seconds if settle is None else settle
+            ):
                 continue
             # An empty file is usually a download or sync that has not finished.
             if stat.st_size == 0 and now - stat.st_mtime < EMPTY_PATIENCE:
@@ -142,14 +145,14 @@ class Ingester:
             ready.append(path)
         return ready
 
-    def process_inbox(self, dry_run: bool = False) -> list[Result]:
+    def process_inbox(self, dry_run: bool = False, settle: float | None = None) -> list[Result]:
         """File what is in the inbox. Each file is claimed first (see claim.py): a file
         another machine claimed is left to it; what this machine claimed earlier but
         did not finish is done first."""
         if dry_run:
-            return [self.ingest(path, dry_run=True) for path in self.pending()]
+            return [self.ingest(path, dry_run=True) for path in self.pending(settle)]
         results = [self.ingest(path) for path in self.claimer.leftovers()]
-        for path in self.pending():
+        for path in self.pending(settle):
             claimed = self.claimer.claim(path)
             if claimed.status == "claimed":
                 results.append(self.ingest(claimed.path))
@@ -233,6 +236,7 @@ class Ingester:
         """original: the office document a converted PDF came from. Review shows the
         original, and filing keeps it next to the PDF."""
         shown = original or path
+        hold = self.config.ingest.review_all and source == "inbox"
 
         def review(proposal: Proposal) -> Result:
             if original:
@@ -267,7 +271,7 @@ class Ingester:
         for existing, reason in matches:
             if not self.index.get(existing)["has_pdf"]:
                 # The PDF of a reference filed without one (metadata only): fill it in.
-                if found.confidence >= self.config.ingest.review_threshold:
+                if found.confidence >= self.config.ingest.review_threshold and not hold:
                     return self._complete(
                         shown, path, existing, digest, keep_source, dry_run, original
                     )
@@ -290,6 +294,8 @@ class Ingester:
             problems.append("no topic matched")
         elif topic_confidence < self.config.ingest.topic_threshold:
             problems.append(f"topic confidence {topic_confidence:.2f}")
+        if hold and not problems:
+            problems.append("ready to file: accept it")
         if problems:
             proposal = self._proposal(path, digest, found, "; ".join(problems), pdf)
             proposal.topic, proposal.topic_confidence = topic, topic_confidence

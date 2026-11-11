@@ -116,6 +116,9 @@ def copy_text(app: App, text: str) -> None:
     app.copy_to_clipboard(text)
 
 
+INBOX_SETTLE = 5  # seconds: i reads a file once its download has finished
+
+
 class Citadel(App):
     TITLE = "Citadel"
     CSS_PATH = Path(__file__).with_name("app.tcss")
@@ -158,6 +161,7 @@ class Citadel(App):
         self.config = config or Config.load()
         self.libraries = self.config.libraries()
         self.library = self.libraries[0]  # where the TUI adds and reviews
+        self.index_file = index.file if index else paths.INDEX_FILE
         self.index = index or self.open_index()
         self.view = ("view", "all")
         self.query_text = ""
@@ -206,14 +210,28 @@ class Citadel(App):
         tree = self.query_one("#topics", Tree)
         tree.show_root = False
         tree.guide_depth = 2
-        self.reload()
+        self.reload(scan=False)  # what the index already knows, at once
         self.refresh_signin()
         self.query_one("#refs", DataTable).focus()
         self.set_interval(1.5, self.refresh_activity)
         if self.needs_setup:
             self.welcome()
-        else:
-            self.offer_standard_names()
+        elif not self.offer_standard_names():
+            self.reindex_in_background()
+
+    @work(thread=True, exclusive=True, group="reindex")
+    def reindex_in_background(self) -> None:
+        """Catch up with the library files. On a OneDrive mount every changed record
+        is downloaded first, which may take minutes: the list stays usable meanwhile."""
+        if not self.available():
+            return
+        index = self.open_index()
+        try:
+            report = index.reindex()
+        finally:
+            index.close()
+        if report.added or report.updated or report.removed:
+            self.call_from_thread(lambda: self.reload(self.current_key(), scan=False))
 
     # -- setup: libraries and sign-in (Settings, S) ----------------------------------
 
@@ -243,14 +261,14 @@ class Citadel(App):
             chosen,
         )
 
-    def offer_standard_names(self) -> None:
+    def offer_standard_names(self) -> bool:
         """A library folder with an older name (Citadel): offer to rename it Citadel-<tag>."""
         import os
 
         from ..library import standard_folder
 
         if os.environ.get("CITADEL_LIBRARY") or not paths.CONFIG_FILE.is_file():
-            return  # not from the config file, so there is nothing to point at the new name
+            return False  # not from the config file, so there is nothing to point at the new name
         for library in self.libraries:
             target = standard_folder(library.root, library.name)
             if target != library.root and library.root.is_dir():
@@ -259,11 +277,19 @@ class Citadel(App):
                     f"{library.root} to {target.name}? On OneDrive it is renamed there, and "
                     "other computers follow when Citadel starts. Nothing inside changes."
                 )
+
+                def decided(yes: bool) -> None:
+                    if yes:
+                        self.rename_library(library)
+                    else:
+                        self.reindex_in_background()
+
                 self.push_screen(
                     ConfirmScreen(question),
-                    lambda yes, library=library: yes and self.rename_library(library),
+                    decided,
                 )
-                return  # one at a time; the next is offered at the next start
+                return True  # one at a time; the next is offered at the next start
+        return False
 
     @work(thread=True, group="ingest")
     def rename_library(self, library: Library, tag: str = "", after=None) -> None:
@@ -358,7 +384,7 @@ class Citadel(App):
 
     def open_index(self) -> Index:
         """A connection over every library (one per worker thread)."""
-        return Index(paths.INDEX_FILE, self.libraries)
+        return Index(self.index_file, self.libraries)
 
     def available(self) -> list[Library]:
         return [library for library in self.libraries if library.exists()]
@@ -374,8 +400,8 @@ class Citadel(App):
                 return Text(library.tag, style=f"bold {self.tones[tones[number % len(tones)]]}")
         return Text(name[:3], style="dim")
 
-    def reload(self, keep: str | None = None) -> None:
-        if self.available():
+    def reload(self, keep: str | None = None, scan: bool = True) -> None:
+        if scan and self.available():
             self.index.reindex()
         self.all_rows = self.index.list()
         self.duplicate_groups = self.find_duplicates()
@@ -792,6 +818,53 @@ class Citadel(App):
         )
 
     def action_review(self) -> None:
+        """Read what is new in the inbox, then show everything waiting for review."""
+        if self.inbox_files():
+            self.notify("Reading the inbox…")
+            self.read_inbox()
+        else:
+            self.open_review()
+
+    def inbox_files(self) -> list[Path]:
+        inbox = self.library.inbox
+        if not inbox.is_dir():
+            return []
+        return [p for p in inbox.iterdir() if p.is_file() and not p.name.startswith(".")]
+
+    @work(thread=True, group="ingest")
+    def read_inbox(self) -> None:
+        """Identify the inbox files (each lands in review, or is filed when confident and
+        review_all is off), as `citadel ingest` does."""
+        from ..ingest import Ingester
+        from ..sources import Http
+
+        with self.ingest_lock:
+            index = self.open_index()
+            try:
+                ingester = Ingester(
+                    self.library, index, Http(self.config.metadata.contact_email), self.config
+                )
+                results = ingester.process_inbox(settle=INBOX_SETTLE)
+            except OSError as error:
+                self.call_from_thread(self.notify, str(error), severity="error")
+                results = []
+            finally:
+                index.close()
+        filed = [r for r in results if r.status == "filed"]
+        left = len(self.inbox_files())
+        summary = f"Inbox read: {len(results) - len(filed)} to review"
+        if filed:
+            summary += f", {len(filed)} filed"
+        if left:
+            summary += f"; {left} not ready yet (still downloading or uploading), press i again"
+        self.call_from_thread(self.notify, summary, severity="warning" if left else "information")
+        self.call_from_thread(self.reload)
+        self.call_from_thread(self.open_review)
+
+    def open_review(self) -> None:
+        if isinstance(self.screen, ReviewScreen):
+            self.screen.refresh_items(self.review_items())
+            return
         self.push_screen(
             ReviewScreen(
                 self.review_items(),

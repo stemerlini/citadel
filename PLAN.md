@@ -41,6 +41,7 @@ Omarchy machines through pull requests on GitHub (`stemerlini/citadel`, private)
 | Libraries | Several (e.g. Personal, SES on the work account), searched as one through one local index with a `library` column; files never cross libraries (2026-11-09) |
 | Library folders | Named `Citadel-<tag>`, lower case; the tag (and the TUI's one-letter mark) comes from the folder, not the drive; first letters must differ. Old `Citadel` folders are renamed in the app (on OneDrive via Graph, eTag-guarded); a config pointing at the old name follows the new folder (2026-11-11) |
 | Setup | In the app: first run asks for a location and a tag (`personal`); Settings (`S`) adds named libraries and the optional sign-in, written to `config.toml` with tomlkit so comments survive. Without Omarchy the theme is Tokyo Night (2026-11-11) |
+| Review | Optional `review_all`: inbox files always wait in `_review/` until accepted; `i` in the app reads the inbox first, so with the watcher off nothing is filed unseen (2026-11-11) |
 | Environments | App: system Python 3.14 in `.venv`. Marker: its own Python 3.13 env (`.venv-convert`, via mise) run as a worker subprocess, because Marker pins `pillow<11` (no 3.14 wheel) and drags in PyTorch |
 
 ## Library layout
