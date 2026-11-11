@@ -21,7 +21,6 @@ from mcp.server.mcpserver import MCPServer
 from . import __version__, cite, edit, paths, record, web
 from .config import Config
 from .index import Index
-from .library import Library
 
 INSTRUCTIONS = """\
 Citadel is the user's own reference library (papers, books, standards, slides), with
@@ -31,6 +30,8 @@ metadata, topic folders, PDFs and Markdown full text.
   references or BibTeX for them.
 - Read papers through `get` (metadata + outline) and then `read` (a section or a chunk);
   do not open the PDF when Markdown exists.
+- References may live in several libraries (e.g. Personal and a work library); each
+  result says which (`library`). Never copy a paper from one library into another.
 - When you find or download a paper the user will want to keep, offer to `add` it
   (PDF path, DOI or arXiv id): it is then identified, named and filed.
 """
@@ -40,13 +41,16 @@ REFRESH_SECONDS = 20  # how often the index is brought in line with the files
 
 
 class State:
-    """The library and its index, refreshed when they may have changed."""
+    """The libraries and their one index, refreshed when they may have changed."""
 
     def __init__(self) -> None:
         self.config = Config.load()
-        self.library = Library(self.config.library_path)
-        self.index = Index(paths.INDEX_FILE, self.library.root)
+        self.index = Index(paths.INDEX_FILE, self.config.libraries())
         self.refreshed = 0.0
+
+    def library(self, name: str = ""):
+        """A library by name or tag; "" is the default (first) one."""
+        return self.config.library_named(name)
 
     def fresh(self) -> Index:
         if time.monotonic() - self.refreshed > REFRESH_SECONDS:
@@ -61,12 +65,17 @@ def build_server() -> MCPServer:
     read_only = types.ToolAnnotations(read_only_hint=True, open_world_hint=False)
 
     @server.tool(annotations=read_only)
-    def search(query: str, limit: int = 10, topic: str = "") -> dict:
-        """Full-text search of the library (titles, authors, abstracts, tags and the
+    def search(query: str, limit: int = 10, topic: str = "", library: str = "") -> dict:
+        """Full-text search of all libraries (titles, authors, abstracts, tags and the
         converted text), best matches first. `topic` limits it to a topic folder and its
-        subtopics, e.g. "space-engineering/radiation-effects"."""
+        subtopics, e.g. "space-engineering/radiation-effects"; `library` to one library
+        (by name, e.g. "Personal")."""
         index = state.fresh()
-        rows = index.search(query, limit=max(limit * 3, 30) if topic else limit)
+        try:
+            name = state.library(library).name if library else ""
+        except LookupError as error:
+            return {"error": str(error)}
+        rows = index.search(query, limit=max(limit * 3, 30) if topic else limit, library=name)
         if topic:
             rows = [r for r in rows if r["topic"] == topic or r["topic"].startswith(f"{topic}/")][
                 :limit
@@ -82,7 +91,7 @@ def build_server() -> MCPServer:
         row = index.get(citekey)
         if row is None:
             return {"error": f"no reference {citekey}; use search"}
-        folder = index.root / row["folder"]
+        folder = index.path(row)
         data = row["data"]
         body = _body(folder)
         text = record.fulltext(body)
@@ -112,6 +121,8 @@ def build_server() -> MCPServer:
                 )
                 if data.get(k)
             },
+            "citekey": row["citekey"],  # the index's key (unique across libraries)
+            "library": row["library"],
             "online": {
                 "publisher": web.publisher_url(data.get("doi", ""), data.get("arxiv", "")) or None,
                 "search": web.search_url(data["title"], data.get("authors"), data.get("year")),
@@ -143,7 +154,7 @@ def build_server() -> MCPServer:
         row = index.get(citekey)
         if row is None:
             return {"error": f"no reference {citekey}; use search"}
-        text = record.fulltext(_body(index.root / row["folder"]))
+        text = record.fulltext(_body(index.path(row)))
         if not text:
             return {
                 "error": f"{citekey} has no Markdown yet",
@@ -183,6 +194,7 @@ def build_server() -> MCPServer:
             except edit.EditError:
                 missing.append(key)
                 continue
+            ref.citekey = key  # the index's key (unique across libraries)
             found.append(cite.format_ref(ref, style).rstrip("\n"))
         return {"style": style, "citations": found, "missing": missing}
 
@@ -194,35 +206,49 @@ def build_server() -> MCPServer:
         status: str = "",
         sort: str = "added",
         limit: int = 50,
+        library: str = "",
     ) -> dict:
         """List references, filtered by topic folder (subtopics included), tag, type
-        (article, book, standard, slides…) or reading status (unread, reading, read).
-        sort: added (newest first), year, author or title."""
+        (article, book, standard, slides…), reading status (unread, reading, read) or
+        library (by name). sort: added (newest first), year, author or title."""
         index = state.fresh()
         try:
+            name = state.library(library).name if library else ""
             rows = index.list(
-                topic=topic, tag=tag, type=type, status=status, sort=sort, limit=limit
+                topic=topic,
+                tag=tag,
+                type=type,
+                status=status,
+                sort=sort,
+                limit=limit,
+                library=name,
             )
-        except ValueError as error:
+        except (ValueError, LookupError) as error:
             return {"error": str(error)}
         return {"count": len(rows), "references": [_summary(r) for r in rows]}
 
     @server.tool(annotations=read_only)
-    def topics() -> dict:
-        """The library's topic folders with descriptions and how many references each
-        holds (subtopics included): useful to browse, or to pick a topic for `add`."""
+    def topics(library: str = "") -> dict:
+        """A library's topic folders (the default library unless `library` names one)
+        with descriptions and how many references each holds (subtopics included):
+        useful to browse, or to pick a topic for `add`."""
         index = state.fresh()
+        try:
+            chosen = state.library(library)
+        except LookupError as error:
+            return {"error": str(error)}
         counts: Counter[str] = Counter()
-        for row in index.list():
+        for row in index.list(library=chosen.name):
             topic = row["topic"]
             while topic:
                 counts[topic] += 1
                 topic = topic.rsplit("/", 1)[0] if "/" in topic else ""
         return {
+            "library": chosen.name,
             "topics": [
                 {"path": t.path, "description": t.description, "references": counts[t.path]}
-                for t in state.library.topics()
-            ]
+                for t in chosen.topics()
+            ],
         }
 
     @server.tool(annotations=types.ToolAnnotations(read_only_hint=True, open_world_hint=True))
@@ -268,19 +294,27 @@ def build_server() -> MCPServer:
             read_only_hint=False, destructive_hint=False, open_world_hint=True
         )
     )
-    def add(target: str, topic: str = "", agent: str = "claude") -> dict:
+    def add(target: str, topic: str = "", agent: str = "claude", library: str = "") -> dict:
         """Add a paper to the library: a local PDF/office file path (copied, never moved),
         a DOI ("doi:10.…" or bare; its open-access PDF is fetched when one exists), or an
         arXiv id ("arxiv:2101.12345", downloaded).
         Citadel identifies, names and files it; if unsure it waits in the user's review
-        queue. Give `topic` (see `topics`) when you know it. Duplicates are refused."""
+        queue. Give `topic` (see `topics`) when you know it. Duplicates are refused.
+        `library` picks the library (default: the first one); ask the user when the
+        paper is work material and there is a work library."""
         from .ingest import Ingester
         from .sources import Http, SourceError
 
+        try:
+            chosen = state.library(library)
+        except LookupError as error:
+            return {"status": "error", "reason": str(error)}
+        if not chosen.exists():
+            return {"status": "error", "reason": f"library {chosen.name} is not available"}
         index = state.fresh()
         http = Http(state.config.metadata.contact_email)
         try:
-            result = Ingester(state.library, index, http, state.config).add(
+            result = Ingester(chosen, index, http, state.config).add(
                 target, topic=topic, source=f"agent:{agent}"
             )
         except (OSError, ValueError, SourceError) as error:
@@ -297,6 +331,7 @@ def _summary(row: dict) -> dict:
     authors = row["authors"].split("; ") if row["authors"] else []
     return {
         "citekey": row["citekey"],
+        "library": row["library"],
         "title": row["title"],
         "year": row["year"],
         "authors": authors[:3] + (["et al."] if len(authors) > 3 else []),

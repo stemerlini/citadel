@@ -83,7 +83,7 @@ def test_keep_a_reference_deletes_the_others(setup):
     )
     [group] = duplicates.find(index, library)
     ingester = Ingester(library, index, None, Config())
-    deleted = duplicates.keep(index, library, ingester, group, "reference:copy2004x")
+    deleted = duplicates.keep(index, [ingester], group, "reference:copy2004x")
     assert sorted(deleted) == [
         "_review/again.pdf",
         "plasma-physics/turbulence-transport/" + first.name,
@@ -117,7 +117,7 @@ def test_keep_a_review_item_files_it(setup, monkeypatch):
     ).save(library.review)
     [group] = duplicates.find(index, library)
     ingester = Ingester(library, index, None, Config())
-    duplicates.keep(index, library, ingester, group, "review:better.pdf")
+    duplicates.keep(index, [ingester], group, "review:better.pdf")
     assert not first.exists()
     [row] = index.list()
     assert row["topic"] == "optics" and row["has_pdf"]

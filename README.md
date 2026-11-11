@@ -37,10 +37,40 @@ The library defaults to `~/Cloud/Personal-OneDrive/Citadel`; change `library` in
 `data/config.toml` (or set `CITADEL_LIBRARY`). The topic tree lives in the
 library's `topics.toml`.
 
+Several libraries (say a personal one and one on a work OneDrive) are searched as one;
+each reference shows which library it is in (`P`, `SES`…). Files never move between
+them: each library has its own inbox, review queue, topics and `library.bib`.
+
+```toml
+[[libraries]]
+name = "Personal"
+path = "/home/me/OneDrive-Personal/Citadel"
+[[libraries]]
+name = "SES"
+path = "/home/me/OneDrive-SES/Citadel"
+```
+
+The first library is the default for `add`. A library whose folder is missing (account
+not mounted) is skipped and shown by `citadel doctor`. After adding one:
+`citadel init && citadel reindex`.
+
 ## Install (another machine)
 
-The library is shared through OneDrive; each machine keeps its own index. With
-[uv](https://docs.astral.sh/uv/) and access to this repository:
+The library is shared through OneDrive; each machine keeps its own index. The inbox
+watcher can run on every machine: before filing a PDF a watcher claims it, moving it
+into `_inbox/.claimed/<host>/`. When the library folder is
+on an rclone mount of OneDrive (`rclone mount onedrive-personal: ~/OneDrive-Personal`),
+Citadel makes the claim on OneDrive itself, a move guarded by the file's eTag, so only
+one machine wins. Elsewhere it is only a local rename: keep the watcher on one machine there (`--no-watch` on the others; later
+runs of the installer keep it off, `--watch` turns it back on).
+
+```sh
+gh repo clone stemerlini/citadel ~/Projects/citadel
+~/Projects/citadel/tools/install-omarchy            # or --no-watch
+citadel reindex   # builds this machine's index from the library
+```
+
+Elsewhere, with [uv](https://docs.astral.sh/uv/) and access to this repository:
 
 ```sh
 uv tool install git+https://github.com/stemerlini/citadel   # `uv tool upgrade citadel` later
@@ -49,9 +79,10 @@ citadel reindex   # builds this machine's index from the library
 citadel           # the TUI; `citadel mcp` serves the library to agents
 ```
 
-`init` writes the config to `~/.local/share/citadel/data/config.toml`.
-Run the inbox watcher (`citadel watch`) on one machine only, so two machines don't
-file the same PDF at once. Opening PDFs and pages uses `xdg-open` (Linux).
+`init` writes the config to `~/.local/share/citadel/data/config.toml`. Opening PDFs
+and pages uses `xdg-open` (Linux).
+
+Fixing or changing Citadel from any machine: see [AGENTS.md](AGENTS.md).
 
 ## PDF → Markdown (Marker, on the GPU)
 
@@ -118,9 +149,10 @@ reference (e.g. `ECSS-…-Annex-A.docx`) are attached to it under `attachments/`
 citadel ingest              # file what is in <library>/_inbox (or send it to review)
 citadel review              # what is waiting, with Citadel's proposal
 citadel review accept NAME [--topic T] [--doi D]
-citadel add arxiv:2101.12345 | doi:10.… | paper.pdf
+citadel add arxiv:2101.12345 | doi:10.… | paper.pdf [--library SES]
 citadel convert [CITEKEY…] [--all] [--force] [--ocr]
-citadel search "kelvin helmholtz" ; citadel get CITEKEY
+citadel search "kelvin helmholtz" [--library SES] ; citadel get CITEKEY
+citadel list [--library Personal]
 citadel cite CITEKEY… [--format reference|bibtex|key]
 citadel refs CITEKEY [--cited-by] [--add N…]      # citation tree (OpenAlex); adds fetch open-access PDFs
 citadel web CITEKEY [--google]                     # publisher page / Google search
@@ -146,8 +178,11 @@ GitHub Copilot CLI (`~/.copilot/mcp-config.json`), and links the `citadel` skill
 | `references` | the citation tree: what a paper cites or what cites it, with library and open-access marks |
 | `add` | add a PDF, DOI or arXiv id (recorded as `agent:NAME`; a DOI brings its open-access PDF); the only tool that writes |
 
-Other agents: run `citadel mcp` as a stdio MCP server. `library.bib` in the library root
-holds every reference as BibTeX (kept current by the watcher; `citadel bib` on demand).
+Other agents: run `citadel mcp` as a stdio MCP server. Results carry the reference's
+`library`; `search`, `list_references`, `topics` and `add` take an optional `library`.
+`library.bib` in each library's root holds that library's references as BibTeX (kept
+current by the watcher; `citadel bib` on demand; `citadel bib --output FILE` writes
+all libraries into one file).
 
 ## Development
 

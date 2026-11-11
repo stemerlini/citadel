@@ -66,6 +66,7 @@ CITE_FORMATS = ("reference", "bibtex", "key")
 # orders disappear first when the window is narrow.
 COLUMNS = [
     ("status", "", 1, 0),
+    ("library", "Lib", 3, 1),
     ("year", "Year", 4, 0),
     ("title", "Title", None, 0),
     ("author", "Author", 16, 1),
@@ -142,8 +143,9 @@ class Citadel(App):
     def __init__(self, config: Config | None = None, index: Index | None = None) -> None:
         super().__init__()
         self.config = config or Config.load()
-        self.library = Library(self.config.library_path)
-        self.index = index or Index(paths.INDEX_FILE, self.library.root)
+        self.libraries = self.config.libraries()
+        self.library = self.libraries[0]  # where the TUI adds and reviews
+        self.index = index or self.open_index()
         self.view = ("view", "all")
         self.query_text = ""
         self.rows: list[dict] = []
@@ -185,7 +187,9 @@ class Citadel(App):
             self.theme = theme.name
         self.query_one("#search").display = False
         variables = self.get_css_variables()
-        self.tones = {name: variables.get(name, "") for name in ("accent", "warning", "success")}
+        self.tones = {
+            name: variables.get(name, "") for name in ("accent", "warning", "success", "error")
+        }
         tree = self.query_one("#topics", Tree)
         tree.show_root = False
         tree.guide_depth = 2
@@ -195,8 +199,26 @@ class Citadel(App):
 
     # -- data -> widgets ---------------------------------------------------------------
 
+    def open_index(self) -> Index:
+        """A connection over every library (one per worker thread)."""
+        return Index(paths.INDEX_FILE, self.libraries)
+
+    def available(self) -> list[Library]:
+        return [library for library in self.libraries if library.exists()]
+
+    def library_of(self, name: str) -> Library:
+        return next((lib for lib in self.libraries if lib.name == name), self.library)
+
+    def library_tag(self, name: str) -> Text:
+        """The short coloured tag of a reference's library."""
+        tones = ("accent", "warning", "success", "error")
+        for number, library in enumerate(self.libraries):
+            if library.name == name:
+                return Text(library.tag, style=f"bold {self.tones[tones[number % len(tones)]]}")
+        return Text(name[:3], style="dim")
+
     def reload(self, keep: str | None = None) -> None:
-        if self.library.exists():
+        if self.available():
             self.index.reindex()
         self.all_rows = self.index.list()
         self.duplicate_groups = self.find_duplicates()
@@ -207,15 +229,15 @@ class Citadel(App):
     def refresh_stats(self) -> None:
         total = len(self.all_rows)
         markdown = sum(r["has_fulltext"] for r in self.all_rows)
-        inbox = (
-            len([p for p in self.library.inbox.iterdir() if p.is_file()])
-            if self.library.inbox.is_dir()
-            else 0
+        inbox = sum(
+            len([p for p in library.inbox.iterdir() if p.is_file()])
+            for library in self.available()
+            if library.inbox.is_dir()
         )
-        review = (
-            len(list(self.library.review.glob("*.citadel.json")))
-            if self.library.review.is_dir()
-            else 0
+        review = sum(
+            len(list(library.review.glob("*.citadel.json")))
+            for library in self.available()
+            if library.review.is_dir()
         )
         parts = [f"[b]{total}[/] references", f"[b]{markdown}[/] in Markdown"]
         if inbox:
@@ -284,7 +306,8 @@ class Citadel(App):
                 tree.root.add_leaf(label, data=("type", kind))
         tree.root.add_leaf(Text("─" * 20, style="dim"), data=None)
         nodes = {"": tree.root}
-        for topic in sorted(t.path for t in self.library.topics()):
+        every = {t.path for library in self.available() for t in library.topics()}
+        for topic in sorted(every):
             parent = topic.rsplit("/", 1)[0] if "/" in topic else ""
             label = Text(topic.rsplit("/", 1)[-1])
             if counts[topic]:
@@ -344,6 +367,7 @@ class Citadel(App):
             mark, color = STATUS_MARKS.get(row["status"], (" ", ""))
             cells = {
                 "status": Text(mark, style=f"bold {self.tones[color]}" if color else "dim"),
+                "library": self.library_tag(row["library"]),
                 "year": str(row["year"] or ""),
                 "title": Text(clip(row["title"], layout["title"])),
                 "author": clip(row["first_author"], layout.get("author", 16)),
@@ -433,7 +457,9 @@ class Citadel(App):
                 "the inbox, it is attached here",
                 style=f"bold {self.tones['warning']}",
             )
-        text.append("\n" + row["citekey"], style="dim")
+        text.append("\n")
+        text.append_text(self.library_tag(row["library"]))
+        text.append(f" {row['library']} · {row['citekey']}", style="dim")
         for tag in data.get("tags") or []:
             text.append("  ")
             text.append(f" {tag} ", style="reverse")
@@ -542,27 +568,26 @@ class Citadel(App):
 
         self.push_screen(EditScreen(ref), save)
 
-    def topic_paths(self) -> list[str]:
-        return sorted(t.path for t in self.library.topics())
+    def topic_paths(self, library: str = "") -> list[str]:
+        """Topics of a library: the one given, else the default (adding, reviewing)."""
+        chosen = self.library_of(library) if library else self.library
+        return sorted(t.path for t in chosen.topics())
 
     def action_move(self) -> None:
         ref, _, _ = self.selected()
+        topics = self.topic_paths(self.current_row()["library"])
 
         def move(topic: str | None) -> None:
             if topic and topic != ref.topic:
                 try:
-                    edit.update(
-                        self.index, ref.citekey, topics=set(self.topic_paths()), topic=topic
-                    )
+                    edit.update(self.index, ref.citekey, topics=set(topics), topic=topic)
                 except edit.EditError as error:
                     self.notify(str(error), severity="error")
                     return
                 self.reload(keep=ref.citekey)
                 self.notify(f"Moved to {topic}.", timeout=3)
 
-        self.push_screen(
-            TopicPicker(self.topic_paths(), ref.topic, f"Move {ref.citekey} to…"), move
-        )
+        self.push_screen(TopicPicker(topics, ref.topic, f"Move {ref.citekey} to…"), move)
 
     def action_convert(self) -> None:
         row = self.current_row()
@@ -575,7 +600,7 @@ class Citadel(App):
     def convert(self, citekeys: list[str], force: bool = False) -> None:
         from ..convert import Converter, ConvertError
 
-        index = Index(paths.INDEX_FILE, self.library.root)  # this thread's own connection
+        index = self.open_index()  # this thread's own connection
         try:
             converter = Converter(index, self.config)
             jobs = converter.pending(citekeys, force=force)
@@ -631,7 +656,7 @@ class Citadel(App):
         from ..sources import Http, SourceError
 
         with self.ingest_lock:
-            index = Index(paths.INDEX_FILE, self.library.root)
+            index = self.open_index()
             http = Http(self.config.metadata.contact_email)
             verb = {
                 "add": "adding",
@@ -693,7 +718,8 @@ class Citadel(App):
         from .. import duplicates
 
         try:
-            return duplicates.find(self.index, self.library) if self.library.exists() else []
+            available = self.available()
+            return duplicates.find(self.index, available) if available else []
         except OSError:
             return []
 
@@ -706,14 +732,16 @@ class Citadel(App):
         from ..ingest import Ingester
 
         with self.ingest_lock:
-            index = Index(paths.INDEX_FILE, self.library.root)
+            index = self.open_index()
             try:
                 if action == "ignore":
-                    duplicates.ignore(self.library, group)
+                    duplicates.ignore(self.available(), group)
                     message = "Marked as not duplicates."
                 else:
-                    ingester = Ingester(self.library, index, None, self.config)
-                    deleted = duplicates.keep(index, self.library, ingester, group, keep_id)
+                    ingesters = [
+                        Ingester(library, index, None, self.config) for library in self.available()
+                    ]
+                    deleted = duplicates.keep(index, ingesters, group, keep_id)
                     message = (
                         f"Kept {keep_id.split(':', 1)[1]}; deleted {len(deleted)} "
                         "(OneDrive recycle bin)"
@@ -768,10 +796,10 @@ class Citadel(App):
         from .references import ReferencesScreen
 
         row = self.current_row()
-        self.push_screen(ReferencesScreen(row["citekey"], row["topic"], self.tones))
+        self.push_screen(ReferencesScreen(row["citekey"], row["topic"], self.tones, row["library"]))
 
     @work(thread=True, group="ingest")
-    def fetch_works(self, works, fallback_topic: str, parent: str) -> None:
+    def fetch_works(self, works, fallback_topic: str, parent: str, library: str = "") -> None:
         """Add works found in the citation graph: open-access PDF when there is one."""
         from ..ingest import Ingester
         from ..sources import Http, SourceError
@@ -779,10 +807,11 @@ class Citadel(App):
 
         filed, notes = [], []
         with self.ingest_lock:
-            index = Index(paths.INDEX_FILE, self.library.root)
+            index = self.open_index()
             http = Http(self.config.metadata.contact_email)
             try:
-                ingester = Ingester(self.library, index, http, self.config)
+                # filed next to the paper they were found from, never in another library
+                ingester = Ingester(self.library_of(library), index, http, self.config)
                 for number, w in enumerate(works, 1):
                     self.busy = f"fetching {number}/{len(works)}: {w.label}"
                     try:
@@ -816,4 +845,5 @@ class Citadel(App):
             self.call_from_thread(self.convert, filed)
 
     def action_about(self) -> None:
-        self.push_screen(AboutScreen(__version__, str(self.library.root)))
+        roots = ", ".join(f"{lib.name}: {lib.root}" for lib in self.libraries)
+        self.push_screen(AboutScreen(__version__, roots))

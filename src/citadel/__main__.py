@@ -21,10 +21,12 @@
     citadel web KEY         open the paper online (publisher page, or --google search)
     citadel login           sign in to your library for paywalled papers
     citadel attach KEY PDF  give a reference without a PDF its PDF
-    citadel bib             write library.bib (all references, BibTeX) in the library
+    citadel bib             write each library's library.bib (all its references, BibTeX)
     citadel --version
 
-Every command accepts --json, for agents and scripts.
+Every command accepts --json, for agents and scripts. With several libraries
+([[libraries]] in the config), list/search/get show which library each reference is
+in, and list/search/add/review take --library NAME.
 """
 
 from __future__ import annotations
@@ -58,28 +60,40 @@ def topics_module_default() -> str:
 def cmd_init(args: argparse.Namespace) -> int:
     from . import config as config_module
     from . import paths
-    from .library import Library
 
     config_created = config_module.write_default(
         library=Path(args.library).expanduser() if args.library else None
     )
     config = config_module.Config.load()
-    library = Library(config.library_path)
-    report = library.init()
+    libraries = config.libraries()
+    lines = [f"Config:  {paths.CONFIG_FILE}" + (" (created)" if config_created else "")]
+    reports = []
+    for library in libraries:
+        if library.unmounted() or (len(libraries) > 1 and not library.root.parent.is_dir()):
+            # Its OneDrive is not mounted here (yet): creating it would put it beside.
+            lines.append(f"Library {library.name}: {library.root} is not mounted, skipped")
+            reports.append({"library": library.name, "path": str(library.root), "skipped": True})
+            continue
+        data, text = _init_library(library, len(libraries) > 1)
+        reports.append(data)
+        lines += text
+    data = {**reports[0], "libraries": reports} if reports else {"libraries": []}
+    data |= {"config": str(paths.CONFIG_FILE), "config_created": config_created}
+    emit(data, args.json, "\n".join(lines))
+    return 0
 
+
+def _init_library(library, named: bool) -> tuple[dict, list[str]]:
+    report = library.init()
     data = {
-        "config": str(paths.CONFIG_FILE),
-        "config_created": config_created,
         "library": str(library.root),
+        "name": library.name,
         "topics_file_created": report.topics_file_created,
         "topics_file_updated": report.topics_file_updated,
         "topics_file_customised": report.topics_file_customised,
         "created": report.created,
     }
-    lines = [
-        f"Config:  {paths.CONFIG_FILE}" + (" (created)" if config_created else ""),
-        f"Library: {library.root}",
-    ]
+    lines = [f"Library: {library.root}" + (f" ({library.name})" if named else "")]
     if report.topics_file_created:
         lines.append(f"  created {library.topics_file.name}")
     if report.topics_file_updated:
@@ -97,22 +111,66 @@ def cmd_init(args: argparse.Namespace) -> int:
         or report.topics_file_customised
     ):
         lines.append("  nothing to do: the library is already set up")
-    emit(data, args.json, "\n".join(lines))
-    return 0
+    return data, lines
 
 
 def cmd_doctor(args: argparse.Namespace) -> int:
     from . import __version__, paths
+    from .claim import Claimer
     from .config import Config
-    from .library import Library
+    from .index import Index
 
     config = Config.load()
-    library = Library(config.library_path)
-    problems = library.check()
+    libraries = config.libraries()
+    available = [library for library in libraries if library.exists()]
+    problems, notes, reports = [], [], []
+    for library in libraries:
+        named = f"{library.name}: " if len(libraries) > 1 else ""
+        report = {"name": library.name, "tag": library.tag, "path": str(library.root)}
+        reports.append(report)
+        report["available"] = library.exists()
+        if not library.exists():
+            if available:  # another library works: this one is skipped, not broken
+                notes.append(f"{named}{library.root} is not there (skipped until it is)")
+            else:
+                problems += [f"{named}{p}" for p in library.check()]
+            continue
+        problems += [f"{named}{p}" for p in library.check()]
+        claimer = Claimer(library.inbox)
+        report["claims"] = claimer.backend
+        report["leftovers"] = [str(p) for p in claimer.leftovers()]
+        report["stale_claims"] = [str(p) for p in claimer.stale()]
+        if claimer.backend != "onedrive":
+            notes.append(
+                f"{named}inbox claims are local renames (not on an rclone mount of OneDrive): "
+                "safe with one watcher only"
+            )
+        if report["leftovers"]:
+            notes.append(
+                f"{named}{len(report['leftovers'])} inbox file(s) claimed here and not "
+                "filed yet: the next `citadel ingest` or watcher pass retries them"
+            )
+        for stale in claimer.stale():
+            notes.append(
+                f"{named}{stale.relative_to(library.inbox)} was claimed by "
+                f"{stale.parent.name} over a day ago and not filed: that machine's watcher "
+                "may be stopped (move it back to _inbox/ to file it here)"
+            )
+    clashes = []
+    if paths.INDEX_FILE.exists():
+        index = Index(paths.INDEX_FILE, libraries)
+        clashes = index.clashes()
+        index.close()
+    notes += [
+        f"citekey {c['own']} is used in more than one library: the {c['library']} copy "
+        f"({c['folder']}) is shown as {c['citekey']}"
+        for c in clashes
+    ]
     if not paths.CONFIG_FILE.exists():
         problems.insert(0, f"no config at {paths.CONFIG_FILE} (run `citadel init`)")
     converter = config.convert_python
     vault = config.vault_path
+    library = libraries[0]
     data = {
         "version": __version__,
         "app_root": str(paths.ROOT),
@@ -120,7 +178,10 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         "index": str(paths.INDEX_FILE),
         "library": str(library.root),
         "library_ok": not problems,
+        "libraries": reports,
         "problems": problems,
+        "notes": notes,
+        "citekey_clashes": clashes,
         "vault": str(vault) if vault else None,
         "converter": str(converter),
         "converter_installed": converter.exists(),
@@ -132,8 +193,15 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         f"citadel {__version__}",
         f"App data:  {paths.ROOT}",
         f"Config:    {paths.CONFIG_FILE}",
-        f"Library:   {library.root} [{status}]",
+        *(
+            f"Library:   {lib.root}"
+            + (f" ({lib.name}, shown as {lib.tag})" if len(libraries) > 1 else "")
+            + ("" if lib.exists() else " [not there]")
+            for lib in libraries
+        ),
+        f"           [{status}]",
         *(f"  - {p}" for p in problems),
+        *(f"  · {n}" for n in notes),
         f"Vault:     {vault or 'not set (Obsidian links disabled)'}",
         f"Converter: {converter} "
         f"[{'installed' if converter.exists() else 'not installed yet (Phase 4)'}]",
@@ -148,7 +216,12 @@ def cmd_topics(args: argparse.Namespace) -> int:
     from .config import Config
     from .library import Library
 
-    tree = Library(Config.load().library_path).topics()
+    try:
+        library = Config.load().library_named(args.library)
+    except LookupError as error:
+        emit({"error": str(error)}, args.json, f"Error: {error}")
+        return 1
+    tree = Library(library.root).topics()
     data = {
         "topics": [
             {"path": t.path, "description": t.description, "keywords": list(t.keywords)}
@@ -167,16 +240,27 @@ def open_index(refresh: bool = True):
     from .config import Config
     from .index import Index
 
-    index = Index(paths.INDEX_FILE, Config.load().library_path)
+    index = Index(paths.INDEX_FILE, Config.load().libraries())
     if refresh:
         for problem in index.reindex().problems:
             print(f"warning: {problem}", file=sys.stderr)
     return index
 
 
-def ref_line(row: dict) -> str:
+def ref_line(row: dict, tags: dict[str, str] | None = None) -> str:
+    """One reference per line, led by its library's tag (P, SES…)."""
     year = row["year"] or "n.d."
-    return f"{row['citekey']:<32} {year!s:<5} {row['first_author'][:18]:<18} {row['title']}"
+    tags = tags or {}
+    width = max((len(t) for t in tags.values()), default=0)
+    tag = f"{tags.get(row['library'], row['library']):<{width}} " if tags else ""
+    return f"{tag}{row['citekey']:<32} {year!s:<5} {row['first_author'][:18]:<18} {row['title']}"
+
+
+def library_filter(name: str) -> str:
+    """The library name for --library (a name or a tag), or "" for all."""
+    from .config import Config
+
+    return Config.load().library_named(name).name if name else ""
 
 
 def cmd_reindex(args: argparse.Namespace) -> int:
@@ -184,7 +268,7 @@ def cmd_reindex(args: argparse.Namespace) -> int:
     from .config import Config
     from .index import Index
 
-    index = Index(paths.INDEX_FILE, Config.load().library_path)
+    index = Index(paths.INDEX_FILE, Config.load().libraries())
     report = index.reindex(full=args.full)
     stats = index.stats()
     index.close()
@@ -194,12 +278,18 @@ def cmd_reindex(args: argparse.Namespace) -> int:
         f"{len(report.updated)} updated, {len(report.removed)} removed, "
         f"{report.unchanged} unchanged",
         *(f"  problem: {p}" for p in report.problems),
+        *(f"  skipped: {u}" for u in report.unreachable if u not in report.problems),
     ]
     emit(data, args.json, "\n".join(lines))
     return 0 if not report.problems else 1
 
 
 def cmd_list(args: argparse.Namespace) -> int:
+    try:
+        library = library_filter(args.library)
+    except LookupError as error:
+        emit({"error": str(error)}, args.json, f"Error: {error}")
+        return 1
     index = open_index()
     rows = index.list(
         topic=args.topic,
@@ -208,18 +298,28 @@ def cmd_list(args: argparse.Namespace) -> int:
         status=args.status,
         sort=args.sort,
         limit=args.limit,
+        library=library,
     )
+    tags = index.tags()
     index.close()
-    emit({"references": rows}, args.json, "\n".join(map(ref_line, rows)) or "No references.")
+    text = "\n".join(ref_line(r, tags) for r in rows)
+    emit({"references": rows}, args.json, text or "No references.")
     return 0
 
 
 def cmd_search(args: argparse.Namespace) -> int:
+    try:
+        library = library_filter(args.library)
+    except LookupError as error:
+        emit({"error": str(error)}, args.json, f"Error: {error}")
+        return 1
     index = open_index()
-    rows = index.search(" ".join(args.query), limit=args.limit)
+    rows = index.search(" ".join(args.query), limit=args.limit, library=library)
+    tags = index.tags()
     index.close()
     text = "\n".join(
-        f"{ref_line(r)}\n    {r['snippet']}" if r["snippet"] else ref_line(r) for r in rows
+        f"{ref_line(r, tags)}\n    {r['snippet']}" if r["snippet"] else ref_line(r, tags)
+        for r in rows
     )
     emit({"query": " ".join(args.query), "results": rows}, args.json, text or "No matches.")
     return 0
@@ -228,12 +328,11 @@ def cmd_search(args: argparse.Namespace) -> int:
 def cmd_get(args: argparse.Namespace) -> int:
     index = open_index()
     row = index.get(args.citekey)
-    root = index.root
+    folder = index.path(row) if row else None
     index.close()
     if row is None:
         emit({"error": f"no reference {args.citekey}"}, args.json, f"No reference {args.citekey}.")
         return 1
-    folder = root / row["folder"]
     name = folder.name
     row["paths"] = {
         "folder": str(folder),
@@ -245,7 +344,7 @@ def cmd_get(args: argparse.Namespace) -> int:
         data["title"],
         "; ".join(data.get("authors", [])) or "(no authors)",
         f"{row['year'] or 'n.d.'} · {row['type']} · {row['topic'] or '(no topic)'} · "
-        f"{row['status']}",
+        f"{row['status']} · library {row['library']}",
         *(
             f"{key}: {data[key]}"
             for key in ("journal", "doi", "arxiv", "isbn", "url")
@@ -312,22 +411,39 @@ class Session:
         from .sources import Http
 
         self.config = Config.load()
-        self.library = Library(self.config.library_path)
-        self.index = Index(paths.INDEX_FILE, self.library.root)
+        self.libraries: list[Library] = self.config.libraries()
+        self.library = self.libraries[0]  # the default one
+        self.index = Index(paths.INDEX_FILE, self.libraries)
         self.index.reindex()
         self.http = Http(self.config.metadata.contact_email)
-        self.ingester = Ingester(self.library, self.index, self.http, self.config)
+        # One ingester per library: each files only what is in its own inbox.
+        self.ingesters = [
+            Ingester(library, self.index, self.http, self.config) for library in self.libraries
+        ]
+        self.ingester = self.ingesters[0]
+
+    def available(self):
+        """The ingesters of the libraries that are there."""
+        return [i for i in self.ingesters if i.library.exists()]
+
+    def ingester_for(self, name: str):
+        """The ingester of a library named on the command line ("" = the default)."""
+        library = self.config.library_named(name)
+        return next(i for i in self.ingesters if i.library.name == library.name)
 
     def close(self) -> None:
         self.http.close()
         self.index.close()
 
 
-def result_line(result) -> str:
+def result_line(result, show_library: bool = False) -> str:
     name = result.file if result.file.startswith("doi:") else Path(result.file).name
+    if show_library and result.library:
+        name = f"{result.library}: {name}"
     if result.status == "filed":
+        where = f"{result.library}: " if show_library and result.library else ""
         return (
-            f"filed   {result.folder}\n        {result.title[:90]}  "
+            f"filed   {where}{result.folder}\n        {result.title[:90]}  "
             f"[metadata {result.confidence:.2f}, topic {result.topic_confidence:.2f}]"
         )
     if result.status in ("review", "dry-run"):
@@ -337,16 +453,31 @@ def result_line(result) -> str:
     return f"{result.status:<7} {name}: {result.reason}"
 
 
+def log_to_stderr() -> None:
+    """Claims taken by other machines (info) and claim warnings, on stderr."""
+    import logging
+
+    logging.basicConfig(level=logging.WARNING, format="%(message)s", stream=sys.stderr)
+    logging.getLogger("citadel").setLevel(logging.INFO)
+
+
 def cmd_ingest(args: argparse.Namespace) -> int:
+    log_to_stderr()
     session = Session()
     try:
-        if not session.library.exists():
+        ingesters = session.available()
+        if not ingesters:
             emit({"error": "no library"}, args.json, "No library: run `citadel init`.")
             return 1
-        results = session.ingester.process_inbox(dry_run=args.dry_run)
+        results = [
+            result
+            for ingester in ingesters
+            for result in ingester.process_inbox(dry_run=args.dry_run)
+        ]
+        many = len(session.libraries) > 1
     finally:
         session.close()
-    text = "\n".join(map(result_line, results)) or "The inbox is empty."
+    text = "\n".join(result_line(r, many) for r in results) or "The inbox is empty."
     emit({"results": [r.as_dict() for r in results]}, args.json, text)
     return 1 if any(r.status == "error" for r in results) else 0
 
@@ -365,13 +496,24 @@ def cmd_watch(args: argparse.Namespace) -> int:
     import time
 
     stop_on_sigterm()
+    import logging
+
     from .cite import export_bib
     from .classify import Classifier
     from .convert import Converter, ConvertError
 
+    logging.basicConfig(
+        level=logging.WARNING,
+        format="%(asctime)s %(message)s",
+        datefmt="%H:%M:%S",
+        stream=sys.stdout,
+    )
+    logging.getLogger("citadel").setLevel(logging.INFO)  # claims, not every HTTP request
     session = Session()
     interval = args.interval or session.config.ingest.watch_interval
-    print(f"Watching {session.library.inbox} every {interval}s (Ctrl+C to stop)", flush=True)
+    many = len(session.libraries) > 1
+    inboxes = ", ".join(str(i.library.inbox) for i in session.ingesters)
+    print(f"Watching {inboxes} every {interval}s (Ctrl+C to stop)", flush=True)
 
     def log(line: str) -> None:
         print(f"{time.strftime('%H:%M:%S')} {line}", flush=True)
@@ -379,16 +521,17 @@ def cmd_watch(args: argparse.Namespace) -> int:
     try:
         while True:
             filed = []
-            # Topics and keywords may have changed since the last pass (citadel init).
-            session.ingester.classifier = Classifier(session.library.topics())
-            for result in session.ingester.process_inbox():
-                log(result_line(result))
-                if result.status == "filed":
-                    filed.append(result.citekey)
-            try:
-                export_bib(session.index)  # rewritten only when something changed
-            except OSError as error:
-                log(f"error   library.bib: {error}")
+            for ingester in session.available():  # a library mounted later joins in
+                # Topics and keywords may have changed since the last pass (citadel init).
+                ingester.classifier = Classifier(ingester.library.topics())
+                for result in ingester.process_inbox():
+                    log(result_line(result, many))
+                    if result.status == "filed":
+                        filed.append(result.citekey)
+                try:  # each library's own library.bib, rewritten only when it changed
+                    export_bib(session.index, library=ingester.library.name)
+                except OSError as error:
+                    log(f"error   {ingester.library.name} library.bib: {error}")
             if filed and session.config.convert.auto:
                 converter = Converter(session.index, session.config)
                 try:
@@ -408,10 +551,20 @@ def cmd_add(args: argparse.Namespace) -> int:
     source = f"agent:{args.agent}" if args.agent else "add"
     session = Session()
     try:
-        result = session.ingester.add(args.target, topic=args.topic, source=source, move=args.move)
+        try:
+            ingester = session.ingester_for(args.library)
+        except LookupError as error:
+            emit({"error": str(error)}, args.json, f"Error: {error}")
+            return 1
+        if not ingester.library.exists():
+            message = f"library {ingester.library.name} is not there ({ingester.library.root})"
+            emit({"error": message}, args.json, f"Error: {message}")
+            return 1
+        result = ingester.add(args.target, topic=args.topic, source=source, move=args.move)
+        many = len(session.libraries) > 1
     finally:
         session.close()
-    emit(result.as_dict(), args.json, result_line(result))
+    emit(result.as_dict(), args.json, result_line(result, many))
     return 0 if result.status in ("filed", "review") else 1
 
 
@@ -469,7 +622,11 @@ def cmd_cite(args: argparse.Namespace) -> int:
             except edit.EditError:
                 missing.append(key)
                 continue
-            entries.append({"citekey": key, "text": cite.format_ref(ref, args.format)})
+            ref.citekey = key  # its own, unless it clashes with another library's
+            library = index.get(key)["library"]
+            entries.append(
+                {"citekey": key, "library": library, "text": cite.format_ref(ref, args.format)}
+            )
     finally:
         index.close()
     joiner = "\n" if args.format == "bibtex" else "\n\n" if args.format == "reference" else "\n"
@@ -485,9 +642,12 @@ def cmd_duplicates(args: argparse.Namespace) -> int:
 
     session = Session()
     try:
-        groups = duplicates.find(session.index, session.library)
+        libraries = [i.library for i in session.available()] or [session.library]
+        groups = duplicates.find(session.index, libraries)
+        many = len(session.libraries) > 1
         if args.action == "list":
             lines = []
+            width = max((len(lib.name) for lib in session.libraries), default=0)
             for number, group in enumerate(groups, 1):
                 lines.append(f"{number}. {', '.join(group.reasons)}")
                 for m in group.members:
@@ -495,7 +655,8 @@ def cmd_duplicates(args: argparse.Namespace) -> int:
                         b for b, on in (("md", m.has_markdown), ("notes", m.has_notes)) if on
                     )
                     lines.append(
-                        f"   {m.id:<48} {m.year or 'n.d.'}  {m.title[:50]}"
+                        f"   {f'{m.library:<{width}} ' if many else ''}{m.id:<48} "
+                        + f"{m.year or 'n.d.'}  {m.title[:50]}"
                         + (f"  [{badges}]" if badges else "")
                     )
             emit(
@@ -516,35 +677,50 @@ def cmd_duplicates(args: argparse.Namespace) -> int:
             )
             return 1
         if args.action == "ignore":
-            duplicates.ignore(session.library, group)
+            duplicates.ignore(libraries, group)
             emit({"ignored": group.id}, args.json, "Marked as not duplicates.")
             return 0
         keep_id = next(m.id for m in group.members if m.id == member or m.key == member)
-        deleted = duplicates.keep(session.index, session.library, session.ingester, group, keep_id)
+        deleted = duplicates.keep(session.index, session.available(), group, keep_id)
     finally:
         session.close()
     emit(
         {"kept": keep_id, "deleted": deleted},
         args.json,
-        f"Kept {keep_id}; deleted (to OneDrive's recycle bin): " + ", ".join(deleted),
+        f"Kept {keep_id}; deleted (to OneDrive's recycle bin): " + ", ".join(deleted)
+        if deleted
+        else f"Kept {keep_id}; nothing deleted (copies in other libraries are left alone).",
     )
     return 0
 
 
 def cmd_bib(args: argparse.Namespace) -> int:
+    """Each library gets its own library.bib (its references only: a work library's
+    entries stay in the work OneDrive). --output writes one file with every library."""
     from .cite import export_bib
 
     index = open_index()
+    files = []
     try:
-        path, changed, count = export_bib(
-            index, Path(args.output).expanduser() if args.output else None
-        )
+        if args.output:
+            jobs = [(Path(args.output).expanduser(), None)]
+        else:
+            jobs = [(None, lib.name) for lib in index.libraries if lib.exists()]
+        for target, library in jobs:
+            path, changed, count = export_bib(index, target, library)
+            files.append(
+                {"library": library, "path": str(path), "changed": changed, "entries": count}
+            )
     finally:
         index.close()
     emit(
-        {"path": str(path), "changed": changed, "entries": count},
+        {"files": files, **(files[0] if len(files) == 1 else {})},
         args.json,
-        f"{path}: {count} entries" + ("" if changed else " (already up to date)"),
+        "\n".join(
+            f"{f['path']}: {f['entries']} entries"
+            + ("" if f["changed"] else " (already up to date)")
+            for f in files
+        ),
     )
     return 0
 
@@ -686,17 +862,42 @@ def cmd_mcp(args: argparse.Namespace) -> int:
     return 0
 
 
+def review_ingester(session: Session, name: str, item: str):
+    """The library a review item is in: --library, or the one library holding it."""
+    if name:
+        return session.ingester_for(name)
+    holding = []
+    for ingester in session.available():
+        try:
+            ingester.find_review(item)
+            holding.append(ingester)
+        except LookupError:
+            continue
+    if len(holding) > 1:
+        names = ", ".join(i.library.name for i in holding)
+        raise LookupError(f"{item!r} is in review in {names}: add --library")
+    return holding[0] if holding else session.ingester
+
+
 def cmd_review(args: argparse.Namespace) -> int:
     session = Session()
     try:
-        ingester = session.ingester
+        many = len(session.libraries) > 1
+        try:
+            scope = [session.ingester_for(args.library)] if args.library else session.available()
+            ingester = (
+                review_ingester(session, args.library, args.item) if args.item else session.ingester
+            )
+        except LookupError as error:
+            emit({"error": str(error)}, args.json, f"Error: {error}")
+            return 1
         if args.action == "list":
-            items = ingester.review_items()
-            data = {"items": [item.__dict__ for item in items]}
+            items = [(i.library.name, item) for i in scope for item in i.review_items()]
+            data = {"items": [item.__dict__ | {"library": name} for name, item in items]}
             lines = []
-            for item in items:
+            for name, item in items:
                 title = (item.metadata or {}).get("title", "")
-                lines.append(f"{item.file}\n    {item.reason}")
+                lines.append(f"{name + ': ' if many else ''}{item.file}\n    {item.reason}")
                 if title:
                     lines.append(f"    proposal: {title[:80]} [{item.confidence:.2f}]")
                 if item.topic:
@@ -704,8 +905,9 @@ def cmd_review(args: argparse.Namespace) -> int:
             emit(data, args.json, "\n".join(lines) or "Nothing to review.")
             return 0
         if args.action == "retry":
-            results = ingester.retry(args.item or "")
-            text = "\n".join(map(result_line, results)) or "Nothing to retry."
+            targets = [ingester] if args.item else scope
+            results = [r for i in targets for r in i.retry(args.item or "")]
+            text = "\n".join(result_line(r, many) for r in results) or "Nothing to retry."
             emit({"results": [r.as_dict() for r in results]}, args.json, text)
             return 0
         if not args.item:
@@ -766,9 +968,9 @@ def main(argv: list[str] | None = None) -> None:
     init.add_argument("--library", help="library folder (only used when creating the config)")
     init.set_defaults(func=cmd_init)
     sub.add_parser("doctor", parents=[common], help="check the setup").set_defaults(func=cmd_doctor)
-    sub.add_parser("topics", parents=[common], help="list the topic tree").set_defaults(
-        func=cmd_topics
-    )
+    topics = sub.add_parser("topics", parents=[common], help="list the topic tree")
+    topics.add_argument("--library", default="", help="that library's tree (default: the first)")
+    topics.set_defaults(func=cmd_topics)
 
     reindex = sub.add_parser("reindex", parents=[common], help="update the search index")
     reindex.add_argument("--full", action="store_true", help="re-read every file")
@@ -781,11 +983,13 @@ def main(argv: list[str] | None = None) -> None:
     listing.add_argument("--status", default="", choices=["", "unread", "reading", "read"])
     listing.add_argument("--sort", default="year", choices=["year", "author", "title", "added"])
     listing.add_argument("--limit", type=int)
+    listing.add_argument("--library", default="", help="only this library (name or tag)")
     listing.set_defaults(func=cmd_list)
 
     search = sub.add_parser("search", parents=[common], help="full-text search")
     search.add_argument("query", nargs="+")
     search.add_argument("--limit", type=int, default=20)
+    search.add_argument("--library", default="", help="only this library (name or tag)")
     search.set_defaults(func=cmd_search)
 
     get = sub.add_parser("get", parents=[common], help="show one reference")
@@ -812,6 +1016,7 @@ def main(argv: list[str] | None = None) -> None:
     add.add_argument("--topic", default="", help="topic folder (skips classification)")
     add.add_argument("--move", action="store_true", help="move the PDF instead of copying")
     add.add_argument("--agent", default="", help="name of the agent adding it (recorded)")
+    add.add_argument("--library", default="", help="the library to file it in (default: first)")
     add.set_defaults(func=cmd_add)
 
     review = sub.add_parser("review", parents=[common], help="settle items waiting in _review/")
@@ -830,6 +1035,7 @@ def main(argv: list[str] | None = None) -> None:
         help='accept: an author, "Surname, Given" (repeat for more)',
     )
     review.add_argument("--year", type=int, help="accept: publication year")
+    review.add_argument("--library", default="", help="only this library's review items")
     review.set_defaults(func=cmd_review)
 
     convert = sub.add_parser(
@@ -854,8 +1060,8 @@ def main(argv: list[str] | None = None) -> None:
     dupes.add_argument("member", nargs="?", help="keep/ignore: a citekey or review file name")
     dupes.set_defaults(func=cmd_duplicates)
 
-    bib = sub.add_parser("bib", parents=[common], help="write library.bib")
-    bib.add_argument("--output", help="somewhere else than <library>/library.bib")
+    bib = sub.add_parser("bib", parents=[common], help="write each library's library.bib")
+    bib.add_argument("--output", help="one file with every library's references instead")
     bib.set_defaults(func=cmd_bib)
 
     refs = sub.add_parser(

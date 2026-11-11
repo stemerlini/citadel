@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -36,8 +37,16 @@ class InitReport:
 
 
 class Library:
-    def __init__(self, root: Path):
+    """One library folder. Several can be configured (a personal one, a work one…):
+    they are searched as one, but each files only what arrives in its own inbox."""
+
+    def __init__(self, root: Path, name: str = "", tag: str = ""):
         self.root = root
+        self.name = name or library_name(root)
+        self.tag = tag or short_tag(self.name)
+
+    def __repr__(self) -> str:
+        return f"Library({self.name!r}, {str(self.root)!r})"
 
     @property
     def inbox(self) -> Path:
@@ -57,6 +66,18 @@ class Library:
 
     def exists(self) -> bool:
         return self.root.is_dir()
+
+    def unmounted(self) -> bool:
+        """The library is missing and its folder looks like a OneDrive that is not
+        mounted (an empty folder that is not a mount point): creating it there would
+        leave a stray copy under the mount, or stop the mount."""
+        parent = self.root.parent
+        return (
+            not self.root.exists()
+            and parent.is_dir()
+            and not parent.is_mount()
+            and not any(parent.iterdir())
+        )
 
     def topics(self) -> list[Topic]:
         """The library's topic tree, or the default one before the library is set up."""
@@ -105,6 +126,18 @@ class Library:
             if not (self.root / name).is_dir():
                 problems.append(f"missing folder {name}/ (run `citadel init`)")
         return problems
+
+
+def library_name(root: Path) -> str:
+    """A name for a library given only its path: the OneDrive account it lives in
+    (~/OneDrive-Personal/Citadel, ~/Cloud/Personal-OneDrive/Citadel: "Personal")."""
+    match = re.fullmatch(r"(?i)onedrive[-_ ](.+)|(.+?)[-_ ]onedrive", root.parent.name)
+    return (match.group(1) or match.group(2)) if match else "Library"
+
+
+def short_tag(name: str) -> str:
+    """What lists show for a library: short names whole, others by their initial."""
+    return name if len(name) <= 3 else name[:1].upper()
 
 
 def _sha(content: bytes) -> str:

@@ -133,7 +133,7 @@ async def test_edit_saves_changes(make_app):
 
 def test_table_layout_drops_columns_when_narrow():
     wide = table_layout(160, show_topic=True)
-    assert set(wide) == {"status", "year", "title", "author", "type", "topic", "md"}
+    assert set(wide) == {"status", "library", "year", "title", "author", "type", "topic", "md"}
     narrow = table_layout(70, show_topic=True)
     assert "topic" not in narrow and "type" not in narrow and narrow["title"] >= 24
 
@@ -296,7 +296,7 @@ async def test_reference_tree_explore_back_and_add(make_app, monkeypatch):
     app, _ = make_app()
     fetched = []
     async with app.run_test(size=(140, 44)) as pilot:
-        app.fetch_works = lambda works, topic, parent: fetched.append(
+        app.fetch_works = lambda works, topic, parent, library="": fetched.append(
             ([x.id for x in works], topic, parent)
         )
         await pilot.press("down", "f")  # verma2004statistical is the second row

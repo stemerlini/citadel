@@ -15,14 +15,16 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from . import record
+from .library import Library
 from .record import RecordError, Reference
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS refs (
-    citekey      TEXT PRIMARY KEY,
-    folder       TEXT NOT NULL,     -- relative to the library root
+    citekey      TEXT PRIMARY KEY,  -- unique across libraries (see reindex)
+    library      TEXT NOT NULL,     -- the library's name
+    folder       TEXT NOT NULL,     -- relative to that library's root
     title        TEXT NOT NULL,
     authors      TEXT NOT NULL,     -- "Surname, Given; Surname, Given"
     first_author TEXT NOT NULL,
@@ -56,7 +58,7 @@ CREATE VIRTUAL TABLE IF NOT EXISTS fts USING fts5(
 # bm25 column weights: citekey (unindexed), title, authors, abstract, tags, fulltext
 WEIGHTS = (0.0, 10.0, 5.0, 3.0, 5.0, 1.0)
 LIST_COLUMNS = (
-    "citekey, folder, title, authors, first_author, year, type, topic, status, "
+    "citekey, library, folder, title, authors, first_author, year, type, topic, status, "
     "added, doi, arxiv, has_pdf, has_fulltext"
 )
 
@@ -68,6 +70,7 @@ class ReindexReport:
     removed: list[str] = field(default_factory=list)
     unchanged: int = 0
     problems: list[str] = field(default_factory=list)
+    unreachable: list[str] = field(default_factory=list)  # libraries left as they were
 
     def as_dict(self) -> dict:
         return {
@@ -76,6 +79,7 @@ class ReindexReport:
             "removed": self.removed,
             "unchanged": self.unchanged,
             "problems": self.problems,
+            "unreachable": self.unreachable,
         }
 
 
@@ -93,9 +97,18 @@ def scan(root: Path):
 
 
 class Index:
-    def __init__(self, file: Path, library_root: Path):
+    """One index over every library. `libraries` is a folder (one library) or a list
+    of Library, the default one first."""
+
+    def __init__(self, file: Path, libraries: Path | Library | list[Library]):
+        if isinstance(libraries, Path):
+            libraries = [Library(libraries)]
+        elif isinstance(libraries, Library):
+            libraries = [libraries]
+        self.libraries = list(libraries)
         self.file = file
-        self.root = library_root
+        self.root = self.libraries[0].root  # the default library
+        self.roots = {library.name: library.root for library in self.libraries}
         file.parent.mkdir(parents=True, exist_ok=True)
         self.conn = sqlite3.connect(file, check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
@@ -117,77 +130,148 @@ class Index:
     # -- building ------------------------------------------------------------
 
     def reindex(self, full: bool = False) -> ReindexReport:
-        """Bring the index in line with the files. Only changed files are re-read,
-        unless full is set."""
+        """Bring the index in line with the files of every library. Only changed files
+        are re-read, unless full is set.
+
+        A citekey is unique across libraries: when two libraries use the same one, the
+        library listed first keeps it and the other reference is indexed as
+        <citekey>-<library> (its file is left as it is, and the clash reported)."""
         report = ReindexReport()
-        if not self.root.is_dir():
+        reachable = [library for library in self.libraries if library.root.is_dir()]
+        if not reachable:
             # The OneDrive mount is down, or the library moved: that is not the same
             # as every reference having been deleted, so keep the index as it is.
-            report.problems.append(f"library folder {self.root} is not reachable")
+            report.problems += [
+                f"library folder {library.root} is not reachable" for library in self.libraries
+            ]
             return report
         known = {
-            row["citekey"]: (row["folder"], row["md_mtime"])
-            for row in self.conn.execute("SELECT citekey, folder, md_mtime FROM refs")
+            row["citekey"]: (row["library"], row["folder"], row["md_mtime"], row["own"])
+            for row in self.conn.execute(
+                "SELECT citekey, library, folder, md_mtime, "
+                "json_extract(data, '$.citekey') AS own FROM refs"
+            )
         }
-        by_folder = {folder: key for key, (folder, _) in known.items()}
-        seen: dict[str, str] = {}  # citekey -> folder, this run
+        by_place = {(lib, folder): key for key, (lib, folder, _, _) in known.items()}
+        seen: dict[str, tuple[str, str]] = {}  # citekey -> (library, folder), this run
 
         with self.conn:
-            for path in scan(self.root):
-                folder = path.parent.relative_to(self.root).as_posix()
-                mtime = path.stat().st_mtime
-                old_key = by_folder.get(folder)
-                if not full and old_key and known[old_key][1] == mtime:
-                    seen[old_key] = folder
-                    report.unchanged += 1
+            for library in self.libraries:
+                if library not in reachable:
+                    report.unreachable.append(f"{library.name}: {library.root} is not reachable")
+                    for key, (lib, folder, _, _) in known.items():
+                        if lib == library.name:  # kept until the library is back
+                            seen.setdefault(key, (lib, folder))
                     continue
-                try:
-                    ref, body = record.read(path)
-                except (OSError, UnicodeDecodeError, RecordError) as error:
-                    report.problems.append(f"{folder}: {error}")
-                    continue
-                if ref.citekey in seen:
-                    report.problems.append(
-                        f"{folder}: citekey {ref.citekey} is already used by {seen[ref.citekey]}"
-                    )
-                    continue
-                seen[ref.citekey] = folder
-                topic = path.parent.parent.relative_to(self.root).as_posix()
-                topic = "" if topic == "." else topic
-                if ref.topic != topic:
-                    report.problems.append(
-                        f"{folder}: frontmatter topic is '{ref.topic}' but the folder is in "
-                        f"'{topic}' (indexed where it is)"
-                    )
-                if old_key and old_key != ref.citekey:
-                    self._delete(old_key)  # citekey edited by hand
-                self._store(ref, body, folder, topic, mtime)
-                (report.updated if ref.citekey in known else report.added).append(ref.citekey)
-
+                self._reindex_library(library, known, by_place, seen, full, report)
             for key in known.keys() - seen.keys():
                 self._delete(key)
                 report.removed.append(key)
         return report
 
+    def _reindex_library(self, library, known, by_place, seen, full, report) -> None:
+        root, name = library.root, library.name
+        for path in scan(root):
+            folder = path.parent.relative_to(root).as_posix()
+            where = folder if name == self.libraries[0].name else f"{name}:{folder}"
+            mtime = path.stat().st_mtime
+            old_key = by_place.get((name, folder))
+            if (
+                not full
+                and old_key
+                and old_key not in seen
+                and known[old_key][2] == mtime
+                and (old_key == known[old_key][3] or known[old_key][3] in seen)
+            ):
+                seen[old_key] = (name, folder)
+                report.unchanged += 1
+                if old_key != known[old_key][3]:
+                    report.problems.append(_clash(where, known[old_key][3], seen, old_key))
+                continue
+            try:
+                ref, body = record.read(path)
+            except (OSError, UnicodeDecodeError, RecordError) as error:
+                report.problems.append(f"{where}: {error}")
+                continue
+            key = ref.citekey
+            if key in seen:
+                other, other_folder = seen[key]
+                if other == name:
+                    report.problems.append(
+                        f"{where}: citekey {key} is already used by {other_folder}"
+                    )
+                    continue
+                key = f"{ref.citekey}-{_slug(name)}"
+                report.problems.append(_clash(where, ref.citekey, seen, key))
+                if key in seen:
+                    continue
+            seen[key] = (name, folder)
+            topic = path.parent.parent.relative_to(root).as_posix()
+            topic = "" if topic == "." else topic
+            if ref.topic != topic:
+                report.problems.append(
+                    f"{where}: frontmatter topic is '{ref.topic}' but the folder is in "
+                    f"'{topic}' (indexed where it is)"
+                )
+            if old_key and old_key != key and old_key not in seen:
+                self._delete(old_key)  # citekey edited by hand
+            self._store(ref, body, name, folder, topic, mtime, key)
+            (report.updated if key in known else report.added).append(key)
+
     def add(self, md_path: Path) -> str:
         """Index one record right away (just filed), so the next file in the same batch
         sees it: duplicates are caught and its names are taken."""
         ref, body = record.read(md_path)
-        folder = md_path.parent.relative_to(self.root).as_posix()
-        topic = md_path.parent.parent.relative_to(self.root).as_posix()
+        library = self.library_of(md_path)
+        folder = md_path.parent.relative_to(library.root).as_posix()
+        topic = md_path.parent.parent.relative_to(library.root).as_posix()
         with self.conn:
-            self._store(ref, body, folder, "" if topic == "." else topic, md_path.stat().st_mtime)
+            self._store(
+                ref,
+                body,
+                library.name,
+                folder,
+                "" if topic == "." else topic,
+                md_path.stat().st_mtime,
+            )
         return ref.citekey
 
-    def _store(self, ref: Reference, body: str, folder: str, topic: str, mtime: float) -> None:
-        directory = self.root / folder
+    def library_of(self, path: Path) -> Library:
+        """The library a file or folder is in."""
+        for library in sorted(self.libraries, key=lambda lib: len(lib.root.parts), reverse=True):
+            if path.is_relative_to(library.root):
+                return library
+        raise ValueError(f"{path} is in none of the libraries")
+
+    def path(self, row: dict) -> Path:
+        """Where a reference's folder is (row: from get, list or search)."""
+        return self.roots.get(row["library"], self.root) / row["folder"]
+
+    def tags(self) -> dict[str, str]:
+        """Library name -> its short tag, for lists."""
+        return {library.name: library.tag for library in self.libraries}
+
+    def _store(
+        self,
+        ref: Reference,
+        body: str,
+        library: str,
+        folder: str,
+        topic: str,
+        mtime: float,
+        key: str = "",
+    ) -> None:
+        """key: the citekey to index it under, when it is not its own (a clash)."""
+        key = key or ref.citekey
+        directory = self.roots[library] / folder
         text = record.fulltext(body)
-        self._delete(ref.citekey)
+        self._delete(key)
         self.conn.execute(
             f"INSERT INTO refs ({LIST_COLUMNS}, pdf_sha256, md_mtime, data) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (
-                ref.citekey,
+                key,
+                library,
                 folder,
                 ref.title,
                 "; ".join(ref.authors),
@@ -207,12 +291,12 @@ class Index:
             ),
         )
         self.conn.executemany(
-            "INSERT OR IGNORE INTO tags VALUES (?, ?)", [(ref.citekey, tag) for tag in ref.tags]
+            "INSERT OR IGNORE INTO tags VALUES (?, ?)", [(key, tag) for tag in ref.tags]
         )
         self.conn.execute(
             "INSERT INTO fts VALUES (?,?,?,?,?,?)",
             (
-                ref.citekey,
+                key,
                 ref.title,
                 " ; ".join(ref.authors),
                 ref.abstract,
@@ -238,15 +322,31 @@ class Index:
         result["tags"] = self._tags(citekey)
         return result
 
-    def find_doi(self, doi: str) -> str | None:
-        row = self.conn.execute("SELECT citekey FROM refs WHERE doi = ?", (doi.lower(),)).fetchone()
-        return row["citekey"] if row else None
-
-    def find_sha256(self, sha256: str) -> str | None:
+    def find_doi(self, doi: str, library: str = "") -> str | None:
+        """The reference with this DOI (in that library only, when given)."""
         row = self.conn.execute(
-            "SELECT citekey FROM refs WHERE pdf_sha256 = ? AND pdf_sha256 != ''", (sha256,)
+            "SELECT citekey FROM refs WHERE doi = ? AND (? = '' OR library = ?)",
+            (doi.lower(), library, library),
         ).fetchone()
         return row["citekey"] if row else None
+
+    def find_sha256(self, sha256: str, library: str = "") -> str | None:
+        row = self.conn.execute(
+            "SELECT citekey FROM refs WHERE pdf_sha256 = ? AND pdf_sha256 != '' "
+            "AND (? = '' OR library = ?)",
+            (sha256, library, library),
+        ).fetchone()
+        return row["citekey"] if row else None
+
+    def clashes(self) -> list[dict]:
+        """References indexed under another citekey than their own (see reindex)."""
+        return [
+            dict(row)
+            for row in self.conn.execute(
+                "SELECT citekey, library, folder, json_extract(data, '$.citekey') AS own "
+                "FROM refs WHERE citekey != json_extract(data, '$.citekey') ORDER BY citekey"
+            )
+        ]
 
     def citekeys(self) -> set[str]:
         return {row[0] for row in self.conn.execute("SELECT citekey FROM refs")}
@@ -263,9 +363,14 @@ class Index:
         status: str = "",
         sort: str = "year",
         limit: int | None = None,
+        library: str = "",
     ) -> list[dict]:
-        """References filtered by topic (including subtopics), tag, type and status."""
+        """References filtered by topic (including subtopics), tag, type, status and
+        library (its name)."""
         where, params = [], []
+        if library:
+            where.append("library = ?")
+            params.append(library)
         if topic:
             where.append("(topic = ? OR topic LIKE ? ESCAPE '\\')")
             params += [topic, _like_prefix(topic) + "/%"]
@@ -294,19 +399,20 @@ class Index:
             sql += f" LIMIT {int(limit)}"
         return [dict(row) for row in self.conn.execute(sql, params)]
 
-    def search(self, query: str, limit: int = 50) -> list[dict]:
+    def search(self, query: str, limit: int = 50, library: str = "") -> list[dict]:
         """Full-text search, best matches first. Words are ANDed; the last one is a prefix."""
         match = fts_query(query)
         if not match:
             return []
         weights = ", ".join(str(w) for w in WEIGHTS)
         rows = self.conn.execute(
-            f"SELECT r.citekey, r.folder, r.title, r.authors, r.first_author, r.year, r.type, "
-            f"r.topic, r.status, r.added, r.doi, r.arxiv, r.has_pdf, r.has_fulltext, "
+            f"SELECT r.citekey, r.library, r.folder, r.title, r.authors, r.first_author, "
+            f"r.year, r.type, r.topic, r.status, r.added, r.doi, r.arxiv, r.has_pdf, "
+            f"r.has_fulltext, "
             f"snippet(fts, 5, '[', ']', '…', 12) AS snippet, bm25(fts, {weights}) AS score "
             f"FROM fts JOIN refs r ON r.citekey = fts.citekey "
-            f"WHERE fts MATCH ? ORDER BY score LIMIT ?",
-            (match, limit),
+            f"WHERE fts MATCH ? AND (? = '' OR r.library = ?) ORDER BY score LIMIT ?",
+            (match, library, library, limit),
         )
         return [dict(row) for row in rows]
 
@@ -338,6 +444,17 @@ def fts_query(query: str) -> str:
     quoted = [f'"{t}"' for t in tokens]
     quoted[-1] += "*"
     return " ".join(quoted)
+
+
+def _clash(where: str, citekey: str, seen: dict, key: str) -> str:
+    return (
+        f"{where}: citekey {citekey} is also used in library {seen[citekey][0]}; "
+        f"indexed as {key} (give one of them another citekey)"
+    )
+
+
+def _slug(name: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "", name.lower()) or "library"
 
 
 def _like_prefix(text: str) -> str:

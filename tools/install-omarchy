@@ -4,6 +4,10 @@
 # plugin), and for agents the skill and MCP server (Claude Code and Copilot CLI). Safe to run again, e.g. after pulling changes or moving the project.
 # Your library on OneDrive is never touched. Undo with tools/uninstall-omarchy.
 set -euo pipefail
+# Watchers on several machines claim each inbox PDF atomically on OneDrive, so any
+# number can run when the library folder is on an rclone mount of OneDrive:
+#   --no-watch  turn it off on this machine; later runs keep it off
+#   --watch     turn it back on
 
 ROOT="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
 BIN="$HOME/.local/bin/citadel"
@@ -13,6 +17,15 @@ UNIT="$HOME/.config/systemd/user/citadel-watch.service"
 PLUGIN_ID="smerlini.citadel"
 PLUGIN_DIR="$HOME/.config/omarchy/plugins/$PLUGIN_ID"
 SHELL_JSON="$HOME/.config/omarchy/shell.json"
+
+NO_WATCH="$ROOT/data/no-watch"  # machine-local marker (data/ is not in git)
+for arg in "$@"; do
+  case $arg in
+    --no-watch) mkdir -p "$ROOT/data" && touch "$NO_WATCH" ;;
+    --watch) rm -f "$NO_WATCH" ;;
+    *) echo "unknown option $arg (use --watch or --no-watch)" >&2 && exit 2 ;;
+  esac
+done
 
 step() { printf '\e[1;32m›\e[0m %s\n' "$*"; }
 note() { printf '\e[1;33m›\e[0m %s\n' "$*"; }
@@ -66,9 +79,14 @@ if [[ ! -f $UNIT ]] || [[ "$(cat "$UNIT")" != "$new_unit" ]]; then
   printf '%s\n' "$new_unit" >"$UNIT"
   systemctl --user daemon-reload
 fi
-systemctl --user enable citadel-watch.service &>/dev/null
-systemctl --user restart citadel-watch.service  # picks up new code too
-step "Inbox watcher: $(systemctl --user is-active citadel-watch.service) (journalctl --user -u citadel-watch -f)"
+if [[ -e $NO_WATCH ]]; then
+  systemctl --user disable --now citadel-watch.service &>/dev/null || true
+  step "Inbox watcher: off on this machine (--watch turns it on)"
+else
+  systemctl --user enable citadel-watch.service &>/dev/null
+  systemctl --user restart citadel-watch.service  # picks up new code too
+  step "Inbox watcher: $(systemctl --user is-active citadel-watch.service) (journalctl --user -u citadel-watch -f)"
+fi
 
 # 6. Desktop widget (shell plugin). Omarchy rejects symlinked plugin folders, so
 # the files are copied; run this script again after changing them.

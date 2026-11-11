@@ -3,9 +3,10 @@
 > The maesters' library for an Omarchy scientist: drop a paper in, get it renamed,
 > catalogued, cited, converted to Markdown, and readable by you, Obsidian and agents.
 
-Status: Phase 6 done (2026-10-12): MCP server, Claude Code skill, library.bib; 234 tests.
-Library at `~/Cloud/Personal-OneDrive/Citadel` (31 references). Next: migration (Phase 8),
-then Obsidian when the vault exists.
+Status (2026-11-08): Phases 0-6 done, plus the citation tree, slides and posters, and the
+library sign-in for paywalled papers (`access.py`); 278 tests. Maintained from several
+Omarchy machines through pull requests on GitHub (`stemerlini/citadel`, private): see
+[AGENTS.md](AGENTS.md). Next: migration (Phase 8), then Obsidian when the vault exists.
 
 ## Goals
 
@@ -35,6 +36,9 @@ then Obsidian when the vault exists.
 | Obsidian | Library outside the vault; the vault links to it (see *Obsidian integration*) |
 | Zotero | Out of scope for now |
 | Stack | Python + Textual + textual-image (same as Toploader), SQLite index, pytest, ruff |
+| Paywalled papers | Library sign-in in Citadel's own Chromium profile (Imperial SSO now; an EZproxy prefix for libraries such as BnL). The user clicks the PDF; Citadel never drives publisher sites (2026-11-08) |
+| Maintenance | GitHub, private; every change through a pull request; any number of inbox watchers, each inbox file claimed atomically on OneDrive, found from the library folder's rclone mount (2026-11-11; was one watcher, 2026-11-08) |
+| Libraries | Several (e.g. Personal, SES on the work account), searched as one through one local index with a `library` column; files never cross libraries (2026-11-09) |
 | Environments | App: system Python 3.14 in `.venv`. Marker: its own Python 3.13 env (`.venv-convert`, via mise) run as a worker subprocess, because Marker pins `pillow<11` (no 3.14 wheel) and drags in PyTorch |
 
 ## Library layout
@@ -199,6 +203,16 @@ _inbox/file ─▶ 1 identify ─▶ 2 metadata ─▶ 3 decide ─▶ 4 file �
 **Watcher.** A systemd user service (`citadel watch`) that **polls** `_inbox/`.
 inotify does not see changes that arrive through rclone from other devices.
 
+**Claims (2026-11-09).** Before a file is ingested it is claimed: moved into
+`_inbox/.claimed/<host>/`. When the library folder is on an rclone mount of a OneDrive
+remote (read from `/proc/self/mountinfo`), Citadel itself makes the move on OneDrive,
+conditional on the item's eTag (Microsoft Graph, with the token rclone keeps), so of
+several watchers exactly one wins and the others skip the file (taken; or pending while
+it is still uploading, asked of the mount's `--rc` when it has one). Citadel does not
+depend on omadrive, which stays a file manager (2026-11-11). Elsewhere it is a local rename, safe on one machine only (a
+warning says so). A host finishes its own leftovers on restart; another host's claims older than 24 h
+are listed by `citadel doctor`, never taken over.
+
 **Other ways in:** `citadel add <pdf|doi|arxiv-id|url>`. Agents use the same call to add
 papers they find.
 
@@ -296,6 +310,22 @@ folders), then `omarchy plugin enable smerlini.citadel`.
 - Claude Code skill `omarchy/skill/citadel/SKILL.md`, linked into `~/.claude/skills/citadel`:
   library first, read from Markdown, web only for gaps (offer `add`), cite `[@citekey]`.
 - `library.bib` in the library root (sorted, rewritten only on change; watcher + `citadel bib`).
+  With several libraries each keeps its own `library.bib` (its own references only, so a
+  work bibliography never lands in the personal OneDrive); `citadel bib --output FILE`
+  writes one combined file.
+
+### Several libraries (2026-11-09)
+
+- Config: `[[libraries]]` entries (`name`, `path`); a plain `library = …` is one library
+  named after its OneDrive folder (`OneDrive-Personal` → Personal). A library whose folder
+  is missing (account not mounted) is skipped and reported by `doctor`.
+- One index with a `library` column. Citekeys stay unique: on a clash the later library's
+  reference is indexed as `<key>-<library>`, reported by `doctor`.
+- Every view shows where a reference lives: the TUI tag column, `list`/`search`/`get`,
+  `--json`, the MCP results, `cite --json`. `--library NAME` filters `list`/`search`.
+- Each library has its own `_inbox/`, `_review/`, `topics.toml` and `library.bib`; a file
+  is filed only within its own library, duplicate checks stay within it, and
+  `duplicates` may show a paper in both libraries but deletes only within one.
 - Verified with a fresh headless Claude Code session: it searched Citadel unprompted, cited
   `tylka1997creme96`, and asked for conversion instead of guessing a section.
 
