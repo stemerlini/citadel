@@ -368,36 +368,19 @@ class Citadel(App):
 
         self.push_screen(SettingsScreen())
 
-    def action_setup_access(self, after=None) -> None:
-        from .settings import AccessForm
-
-        access = self.config.access
-
-        def saved(values: dict | None) -> None:
-            if values is None:
-                return
-            config_module.save_access(**values)
-            self.apply_config()
-            if values["name"]:
-                self.notify("Sign-in set: click 🔑 in the top bar (or press L) to sign in.")
-            else:
-                self.notify("Sign-in turned off.")
-            if after:
-                after()
-
-        self.push_screen(
-            AccessForm(access.name, access.login_url, access.proxy, access.browser), saved
-        )
+    def save_access(self, accounts: list[dict], browser: str = "") -> None:
+        config_module.save_access(accounts, browser)
+        self.apply_config()
 
     def refresh_signin(self) -> None:
-        name = self.config.access.name
+        names = [account["name"] for account in self.config.access.all()]
         self.query_one("#signin", Static).update(
-            f"🔑 [b]{escape(name)}[/]" if name else "[dim]🔑 sign in[/]"
+            "🔑 [b]sign in[/]" if names else "[dim]🔑 sign in[/]"
         )
         self.query_one("#signin", Static).tooltip = (
-            f"Sign in to {name} for paywalled papers (L)"
-            if name
-            else "Set up a library sign-in for paywalled papers (optional)"
+            f"Sign in for paywalled papers (L): {', '.join(names)}"
+            if names
+            else "Add a sign-in account for paywalled papers (optional)"
         )
 
     @on(events.Click, "#signin")
@@ -1069,15 +1052,18 @@ class Citadel(App):
         self.notify(f"Opened {url}\n{hint}".strip(), timeout=6)
 
     def action_login(self) -> None:
-        """Sign in to the library, in Citadel's own browser profile."""
+        """The sign-in accounts: pick one to sign in, or add one."""
+        from .settings import AccountsScreen
+
+        self.push_screen(AccountsScreen())
+
+    def sign_in(self, name: str) -> None:
+        """Open an account's sign-in page in Citadel's own browser."""
         from .. import access
 
-        if not access.enabled(self.config.access):
-            self.action_setup_access()
-            return
-        if access.login(self.config.access, self.library.inbox):
+        if access.login(self.config.access, self.library.inbox, name):
             self.notify(
-                f"Sign in to {self.config.access.name} in the browser window. "
+                f"Sign in to {name} in the browser window. "
                 "PDFs you download there land in the inbox.",
                 timeout=8,
             )

@@ -6,6 +6,7 @@ from __future__ import annotations
 import shutil
 from pathlib import Path
 
+from rich.markup import escape
 from textual import on
 from textual.app import ComposeResult
 from textual.binding import Binding
@@ -209,68 +210,198 @@ class LibraryForm(ModalScreen[dict | None]):
         self.dismiss({"path": str(folder), "tag": tag})
 
 
-class AccessForm(ModalScreen[dict | None]):
-    """The optional library sign-in: an institution's sign-in page (and EZproxy prefix)."""
+class AccountForm(ModalScreen[dict | None]):
+    """One sign-in account: a name and its sign-in page (and an EZproxy prefix)."""
 
     BINDINGS = [Binding("escape", "dismiss(None)", "Cancel"), Binding("ctrl+s", "save", "Save")]
 
-    def __init__(self, name: str, login_url: str, proxy: str, browser: str) -> None:
+    def __init__(self, account: dict | None = None, taken: tuple[str, ...] = ()) -> None:
         super().__init__()
-        self.values = {"name": name, "login_url": login_url, "proxy": proxy}
-        self.browser = browser
+        self.values = account or {"name": "", "login_url": "", "proxy": ""}
+        self.taken = {name.casefold() for name in taken}
 
     def compose(self) -> ComposeResult:
-        found = browsers()
-        commands = [command for _, command in found]
         with Vertical(classes="dialog wide"):
-            yield Static("Paywall sign-in (optional)", classes="title")
             yield Static(
-                "For papers your university or library pays for. Citadel opens its pages "
-                "in a browser window of its own; you sign in there yourself, and PDFs you "
-                "download there go to the inbox. Leave the name empty to turn it off.",
+                "Edit a sign-in account" if self.values["name"] else "Add a sign-in account",
+                classes="title",
+            )
+            yield Static(
+                "Any account that gives access to papers: your university or library, a "
+                "company, a publisher (IEEE, Springer…). You sign in on its page yourself; "
+                "Citadel never sees the password.",
                 classes="subtitle",
             )
-            yield Static("Name (your institution, e.g. imperial)", classes="field-label")
-            yield Field(self.values["name"], id="access-name")
-            yield Static("Sign-in page", classes="field-label")
+            yield Static("Name (e.g. imperial, ieee)", classes="field-label")
+            yield Field(self.values["name"], id="account-name")
+            yield Static(
+                "Sign-in page (your library's search or login page, or the publisher's)",
+                classes="field-label",
+            )
             yield Field(
                 self.values["login_url"],
                 placeholder="https://library-search.imperial.ac.uk/",
-                id="access-login_url",
+                id="account-login_url",
             )
             yield Static("EZproxy prefix (only if your library uses one)", classes="field-label")
             yield Field(
-                self.values["proxy"],
+                self.values.get("proxy", ""),
                 placeholder="https://proxy.example.org/login?url=",
-                id="access-proxy",
+                id="account-proxy",
             )
-            yield Static("Browser", classes="field-label")
-            if found:
-                value = self.browser if self.browser in commands else commands[0]
-                yield Select(found, value=value, allow_blank=False, id="access-browser")
-            else:
-                yield Static(
-                    "[$warning]No Chrome or Chromium found: install Google Chrome to sign in.[/]"
-                )
             yield Static(
                 "[b]Ctrl+S[/] or [b]Enter[/] saves · [b]Esc[/] cancels", classes="footnote"
             )
 
     def on_mount(self) -> None:
-        self.query_one("#access-name").focus()
+        self.query_one("#account-name").focus()
 
     @on(Input.Submitted)
     def action_save(self) -> None:
         values = {
-            key: self.query_one(f"#access-{key}", Input).value.strip()
+            key: self.query_one(f"#account-{key}", Input).value.strip()
             for key in ("name", "login_url", "proxy")
         }
-        if values["name"] and not values["login_url"].startswith(("https://", "http://")):
+        if not values["name"]:
+            self.notify("Give the account a name.", severity="error")
+            return
+        if values["name"].casefold() in self.taken:
+            self.notify(f"There is already an account called {values['name']}.", severity="error")
+            return
+        if not values["login_url"].startswith(("https://", "http://")):
             self.notify("The sign-in page must be a web address (https://…).", severity="error")
             return
-        selects = self.query("#access-browser")
-        values["browser"] = str(selects.first(Select).value) if selects else ""
         self.dismiss(values)
+
+
+class AccountsScreen(ModalScreen[None]):
+    """Every sign-in account, in the one browser they share: sign in, add, edit, remove."""
+
+    BINDINGS = [
+        Binding("escape", "dismiss(None)", "Close"),
+        Binding("enter", "sign_in", "Sign in", priority=True),
+        Binding("a", "add", "Add"),
+        Binding("e", "edit", "Edit"),
+        Binding("x", "remove", "Remove"),
+    ]
+
+    def compose(self) -> ComposeResult:
+        with Vertical(classes="dialog wide"):
+            yield Static("Sign-in accounts", classes="title")
+            yield Static(
+                "For papers behind a paywall. Each account is signed in once in Citadel's "
+                "own browser window; they share it, so a publisher sees every access you "
+                "have. PDFs downloaded there go to the inbox.",
+                classes="subtitle",
+            )
+            yield DataTable(id="account-table", cursor_type="row")
+            yield Static(id="account-empty", classes="footnote")
+            yield Static("Browser", classes="field-label")
+            found = browsers()
+            commands = [command for _, command in found]
+            if found:
+                browser = self.app.config.access.browser
+                value = browser if browser in commands else commands[0]
+                yield Select(found, value=value, allow_blank=False, id="account-browser")
+            else:
+                yield Static(
+                    "[$warning]No Chrome or Chromium found: install Google Chrome to sign in.[/]"
+                )
+            yield Static(
+                "[b]Enter[/] sign in · [b]a[/] add · [b]e[/] edit · [b]x[/] remove · "
+                "[b]Esc[/] closes",
+                classes="footnote",
+            )
+
+    def on_mount(self) -> None:
+        table = self.query_one("#account-table", DataTable)
+        table.add_columns("Account", "Sign-in page", "")
+        self.refresh_view()
+        table.focus()
+        if not self.accounts():
+            self.action_add()
+
+    def accounts(self) -> list[dict]:
+        return self.app.config.access.all()
+
+    def refresh_view(self) -> None:
+        table = self.query_one("#account-table", DataTable)
+        row = table.cursor_row
+        table.clear()
+        for account in self.accounts():
+            table.add_row(
+                account["name"], account["login_url"], "proxy" if account["proxy"] else ""
+            )
+        table.display = bool(table.row_count)
+        self.query_one("#account-empty", Static).update(
+            "" if table.row_count else "No accounts yet: [b]a[/] adds one."
+        )
+        if table.row_count:
+            table.move_cursor(row=min(row, table.row_count - 1))
+
+    def selected(self) -> dict | None:
+        accounts = self.accounts()
+        row = self.query_one("#account-table", DataTable).cursor_row
+        return accounts[row] if accounts and row < len(accounts) else None
+
+    def save(self, accounts: list[dict]) -> None:
+        selects = self.query("#account-browser")
+        browser = str(selects.first(Select).value) if selects else ""
+        self.app.save_access(accounts, browser)
+        self.refresh_view()
+
+    @on(Select.Changed, "#account-browser")
+    def browser_changed(self) -> None:
+        if str(self.query_one("#account-browser", Select).value) != (
+            self.app.config.access.browser
+        ):
+            self.save(self.accounts())
+
+    def action_sign_in(self) -> None:
+        account = self.selected()
+        if account:
+            self.dismiss(None)
+            self.app.sign_in(account["name"])
+
+    def action_add(self) -> None:
+        def added(values: dict | None) -> None:
+            if values:
+                self.save([*self.accounts(), values])
+                self.query_one("#account-table", DataTable).move_cursor(row=len(self.accounts()))
+
+        names = tuple(a["name"] for a in self.accounts())
+        self.app.push_screen(AccountForm(taken=names), added)
+
+    def action_edit(self) -> None:
+        account = self.selected()
+        if not account:
+            return
+
+        def edited(values: dict | None) -> None:
+            if values:
+                self.save([values if a is account else a for a in self.accounts()])
+
+        accounts = self.accounts()
+        account = next(a for a in accounts if a["name"] == account["name"])
+        taken = tuple(a["name"] for a in accounts if a is not account)
+        self.app.push_screen(AccountForm(dict(account), taken), edited)
+
+    def action_remove(self) -> None:
+        account = self.selected()
+        if not account:
+            return
+
+        def confirmed(yes: bool | None) -> None:
+            if yes:
+                self.save([a for a in self.accounts() if a["name"] != account["name"]])
+
+        self.app.push_screen(
+            ConfirmScreen(
+                f"Remove the account {account['name']}? Citadel's browser keeps any "
+                "session it has until it expires."
+            ),
+            confirmed,
+        )
 
 
 class SettingsScreen(ModalScreen[None]):
@@ -282,7 +413,7 @@ class SettingsScreen(ModalScreen[None]):
         Binding("e", "change", "Rename / move"),
         Binding("x", "remove", "Remove"),
         Binding("u", "default", "Make default"),
-        Binding("s", "access", "Sign-in"),
+        Binding("s", "access", "Sign-in accounts"),
     ]
 
     def compose(self) -> ComposeResult:
@@ -295,10 +426,10 @@ class SettingsScreen(ModalScreen[None]):
                 "(new papers go there) · [b]x[/] remove from Citadel (the files stay)",
                 classes="footnote",
             )
-            yield Static("Paywall sign-in", classes="section")
+            yield Static("Sign-in accounts", classes="section")
             yield Static(id="access-status")
             yield Static(
-                "[b]s[/] set up or turn off · then 🔑 in the top bar (or [b]L[/]) signs in",
+                "[b]s[/] add, edit or remove accounts · 🔑 in the top bar (or [b]L[/]) signs in",
                 classes="footnote",
             )
             yield Static("[b]Esc[/] closes", classes="footnote")
@@ -322,11 +453,11 @@ class SettingsScreen(ModalScreen[None]):
             )
         if table.row_count:
             table.move_cursor(row=min(row, table.row_count - 1))
-        access = self.app.config.access
+        accounts = self.app.config.access.all()
         self.query_one("#access-status", Static).update(
-            f"On: [b]{access.name}[/] · {access.login_url}"
-            if access.name
-            else "[dim]Off: pages open in your usual browser.[/]"
+            ", ".join(f"[b]{escape(a['name'])}[/]" for a in accounts)
+            if accounts
+            else "[dim]None: pages open in your usual browser.[/]"
         )
 
     def entries(self) -> list[dict]:
@@ -397,4 +528,4 @@ class SettingsScreen(ModalScreen[None]):
         )
 
     def action_access(self) -> None:
-        self.app.action_setup_access(after=self.refresh_view)
+        self.app.push_screen(AccountsScreen(), lambda _: self.refresh_view())

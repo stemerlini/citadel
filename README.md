@@ -143,20 +143,22 @@ No PDF for a reference (MD column `—`)? Press `w` (or `g`), download it with y
 institutional access, and drop it into `_inbox/`: Citadel recognises it and attaches it to
 that reference. `citadel attach CITEKEY file.pdf` does the same by hand.
 
-### Paywalled papers: library sign-in
+### Paywalled papers: sign-in accounts
 
-Optional. Set it up in Settings (`S`, then `s`), or by clicking 🔑 in the top bar:
-your institution's name and sign-in page (Imperial:
-`https://library-search.imperial.ac.uk/`), then sign in once with 🔑 (or `L`,
-`citadel login`). From then on `w`, `g` and `citadel web` open pages in Citadel's own
-Chromium profile, signed in to your library, and every download there lands in
-`_inbox/`. On a publisher's page, use "Access through your institution" the first time,
-then click the PDF button: the watcher attaches the file to its reference. You do the
-clicking and Citadel never sees your password; the session stays in
-`data/browser/<name>/` on this machine. That profile reopens where it left off, so the
-sign-in survives closing the window; on Microsoft's sign-in page answer **Yes** to
-"Stay signed in?". For a library that uses EZproxy, also set
-`proxy` to its prefix and publisher links go through it.
+Optional. Click 🔑 in the top bar (or `L`, or Settings `S` then `s`) for the list of
+accounts: `a` adds one, `e` edits, `x` removes, Enter signs in. An account is anything that
+gives you access to papers: your university library (Imperial:
+`https://library-search.imperial.ac.uk/`), a company, a publisher account (IEEE,
+Springer…). Give it a name and its sign-in page, then sign in once (or `citadel login
+[name]`). All accounts share one Chromium profile of Citadel's own, so a publisher's page
+loads with every access you have. From then on `w`, `g` and `citadel web` open pages
+there, and every download lands in `_inbox/`. On a publisher's page, use "Access through
+your institution" the first time, then click the PDF button: the watcher attaches the
+file to its reference. You do the clicking and Citadel never sees your password; the
+sessions stay in `data/browser/citadel/` on this machine. The profile reopens where it
+left off, so sign-ins survive closing the window; on Microsoft's sign-in page answer
+**Yes** to "Stay signed in?". For a library that uses EZproxy, also set its proxy prefix
+and publisher links go through it.
 
 Slides, posters, books, standards and reports stay filed under their topic and are also
 gathered in the sidebar by kind. Slides and posters are recognised from their pages (landscape,

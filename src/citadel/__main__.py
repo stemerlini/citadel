@@ -19,7 +19,7 @@
     citadel mcp             serve the library to agents (MCP over stdio)
     citadel refs KEY        a paper's references (or --cited-by); --add N… fetches them
     citadel web KEY         open the paper online (publisher page, or --google search)
-    citadel login           sign in to your library for paywalled papers
+    citadel login [name]    sign in to an account for paywalled papers
     citadel attach KEY PDF  give a reference without a PDF its PDF
     citadel bib             write each library's library.bib (all its references, BibTeX)
     citadel --version
@@ -186,7 +186,7 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         "converter": str(converter),
         "converter_installed": converter.exists(),
         "gpu": shutil.which("nvidia-smi") is not None,
-        "access": config.access.name or None,
+        "access": [account["name"] for account in config.access.all()],
     }
     status = "ok" if not problems else f"{len(problems)} problem(s)"
     lines = [
@@ -206,7 +206,11 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         f"Converter: {converter} "
         f"[{'installed' if converter.exists() else 'not installed yet (Phase 4)'}]",
         f"GPU:       {'nvidia-smi found' if data['gpu'] else 'none found (Marker will use CPU)'}",
-        f"Sign-in:   {config.access.name or 'not set (pages open in your usual browser)'}",
+        "Sign-in:   "
+        + (
+            ", ".join(a["name"] for a in config.access.all())
+            or "no accounts (pages open in your usual browser)"
+        ),
     ]
     emit(data, args.json, "\n".join(lines))
     return 0 if not problems else 1
@@ -819,18 +823,25 @@ def cmd_login(args: argparse.Namespace) -> int:
     from .library import Library
 
     config = Config.load()
-    if not access.enabled(config.access):
-        message = "No library sign-in set: fill in [access] in the config (see `citadel doctor`)."
+    chosen = access.account(config.access, args.account)
+    if chosen is None:
+        names = ", ".join(a["name"] for a in config.access.all())
+        message = (
+            f"No account called {args.account}: there are {names}."
+            if names
+            else "No sign-in accounts: add one in the app (Settings, S) or under "
+            "[access] in the config."
+        )
         emit({"error": message}, args.json, message)
         return 1
-    opened = access.login(config.access, Library(config.library_path).inbox)
+    opened = access.login(config.access, Library(config.library_path).inbox, chosen["name"])
     data = {
-        "library": config.access.name,
-        "profile": str(access.profile_dir(config.access)),
+        "account": chosen["name"],
+        "profile": str(access.profile_dir()),
         "opened": opened,
     }
     line = (
-        f"Sign in to {config.access.name} in the window that opened; Citadel keeps the "
+        f"Sign in to {chosen['name']} in the window that opened; Citadel keeps the "
         "session.\nPDFs you download there go into the inbox and are attached to their "
         "reference."
         if opened
@@ -1086,9 +1097,11 @@ def main(argv: list[str] | None = None) -> None:
     web_parser.add_argument("--print", action="store_true", help="only print the address")
     web_parser.set_defaults(func=cmd_web)
 
-    sub.add_parser(
-        "login", parents=[common], help="sign in to your library for paywalled papers"
-    ).set_defaults(func=cmd_login)
+    login = sub.add_parser(
+        "login", parents=[common], help="sign in to an account for paywalled papers"
+    )
+    login.add_argument("account", nargs="?", default="", help="its name (default: the first)")
+    login.set_defaults(func=cmd_login)
 
     attach = sub.add_parser("attach", parents=[common], help="add a reference's PDF")
     attach.add_argument("citekey")

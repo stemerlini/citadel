@@ -36,7 +36,7 @@ Omarchy machines through pull requests on GitHub (`stemerlini/citadel`, private)
 | Obsidian | Library outside the vault; the vault links to it (see *Obsidian integration*) |
 | Zotero | Out of scope for now |
 | Stack | Python + Textual + textual-image (same as Toploader), SQLite index, pytest, ruff |
-| Paywalled papers | Library sign-in in Citadel's own Chromium profile (Imperial SSO now; an EZproxy prefix for libraries such as BnL). The user clicks the PDF; Citadel never drives publisher sites (2026-11-08) |
+| Paywalled papers | Any number of sign-in accounts (university, company, publisher) sharing one Chromium profile of Citadel's own (`data/browser/citadel`), so a publisher sees every access; an EZproxy prefix for libraries such as BnL. The user clicks the PDF; Citadel never drives publisher sites (2026-11-08; accounts 2026-11-11) |
 | Maintenance | GitHub, private; every change through a pull request; any number of inbox watchers, each inbox file claimed atomically on OneDrive, found from the library folder's rclone mount (2026-11-11; was one watcher, 2026-11-08) |
 | Libraries | Several (e.g. Personal, SES on the work account), searched as one through one local index with a `library` column; files never cross libraries (2026-11-09) |
 | Start-up | The list draws from the index at once; the library is re-read in a worker, references not confirmed yet greyed out and their file actions disabled. Duplicate detection runs in a worker and reads notes only for duplicates. The index uses WAL and commits each re-read record, so readers are never locked out (2026-11-11) |

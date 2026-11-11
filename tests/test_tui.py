@@ -412,7 +412,7 @@ async def test_settings_add_a_work_library_and_the_sign_in(
 ):
     from textual.widgets import Input
 
-    from citadel.tui.settings import AccessForm, LibraryForm, SettingsScreen
+    from citadel.tui.settings import AccountForm, AccountsScreen, LibraryForm, SettingsScreen
 
     monkeypatch.delenv("CITADEL_LIBRARY", raising=False)
     (tmp_path / "work").mkdir()
@@ -435,14 +435,15 @@ async def test_settings_add_a_work_library_and_the_sign_in(
         assert [(lib.name, lib.tag) for lib in app.libraries][1] == ("work", "w")
         assert (tmp_path / "work" / "Citadel-work" / "_inbox").is_dir()
         await pilot.press("escape")
-        await pilot.click("#signin")  # off: the button opens the sign-in setup
+        await pilot.click("#signin")  # no accounts: the list opens on a new one
         await pilot.pause()
-        assert isinstance(app.screen, AccessForm)
-        app.screen.query_one("#access-name", Input).value = "imperial"
-        app.screen.query_one("#access-login_url", Input).value = "https://library.example/"
+        assert isinstance(app.screen, AccountForm)
+        app.screen.query_one("#account-name", Input).value = "imperial"
+        app.screen.query_one("#account-login_url", Input).value = "https://library.example/"
         app.screen.action_save()
         await pilot.pause()
-        assert app.config.access.name == "imperial"
+        assert isinstance(app.screen, AccountsScreen)
+        assert [a["name"] for a in app.config.access.all()] == ["imperial"]
 
 
 async def test_an_old_library_folder_is_renamed_citadel_tag(tmp_path, config_file, monkeypatch):

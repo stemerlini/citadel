@@ -1,11 +1,13 @@
-"""Paywalled papers through your library's sign-in.
+"""Paywalled papers through your sign-in accounts (a library, a company, a publisher).
 
-Citadel keeps its own Chromium profile per library (data/browser/<name>, on this
-machine only, never on OneDrive). You sign in there once (`citadel login`); publisher
-pages Citadel opens then load with your library's access. The profile saves every
-download into the library inbox without asking, and PDFs open as downloads rather than
-in the viewer, so clicking a paper's PDF button is all it takes: the inbox watcher
-recognises the file and attaches it to its reference (ingest.Ingester._complete).
+Citadel keeps a Chromium profile of its own (data/browser/citadel, on this machine
+only, never on OneDrive). You sign in there once to each account you have (a
+university, a company, a publisher account: `citadel login [name]`, or 🔑 in the app);
+they share the profile, so publisher pages Citadel opens load with every access you
+have. The profile saves every download into the library inbox without asking, and PDFs
+open as downloads rather than in the viewer, so clicking a paper's PDF button is all it
+takes: the inbox watcher recognises the file and attaches it to its reference
+(ingest.Ingester._complete).
 
 You do the clicking. Citadel opens pages in an ordinary browser window and never
 drives the publisher's site, so their access terms and bot checks are respected.
@@ -28,17 +30,37 @@ from pathlib import Path
 from . import paths, web
 from .config import AccessConfig
 
+PROFILE = "citadel"
+
 
 def enabled(access: AccessConfig) -> bool:
-    return bool(access.name)
+    return bool(access.all())
 
 
-def profile_dir(access: AccessConfig) -> Path:
-    return paths.DATA_DIR / "browser" / access.name
+def account(access: AccessConfig, name: str = "") -> dict | None:
+    """The account called name (any case), or the first one."""
+    accounts = access.all()
+    if not name:
+        return accounts[0] if accounts else None
+    return next((a for a in accounts if a["name"].casefold() == name.casefold()), None)
+
+
+def profile_dir(access: AccessConfig | None = None) -> Path:
+    """The browser profile every account shares. One made when each sign-in had its own
+    profile (data/browser/<name>) is taken over, so its sign-in is kept."""
+    base = paths.DATA_DIR / "browser"
+    profile = base / PROFILE
+    if not profile.exists() and base.is_dir():
+        older = [p for p in base.iterdir() if p.is_dir() and (p / "Default").is_dir()]
+        if len(older) == 1 and not running(older[0]):
+            older[0].rename(profile)
+    return profile
 
 
 def proxied(url: str, access: AccessConfig) -> str:
-    return access.proxy + url if access.proxy and url else url
+    """Publisher links go through the first account with an EZproxy prefix, if any."""
+    proxy = next((a["proxy"] for a in access.all() if a["proxy"]), "")
+    return proxy + url if proxy and url else url
 
 
 def running(profile: Path) -> bool:
@@ -90,8 +112,10 @@ def launch(access: AccessConfig, inbox: Path, url: str) -> bool:
         return False
 
 
-def login(access: AccessConfig, inbox: Path) -> bool:
-    return launch(access, inbox, access.login_url or "about:blank")
+def login(access: AccessConfig, inbox: Path, name: str = "") -> bool:
+    """Open an account's sign-in page (the first account's without a name)."""
+    chosen = account(access, name)
+    return launch(access, inbox, (chosen or {}).get("login_url") or "about:blank")
 
 
 def open_page(access: AccessConfig, inbox: Path, url: str, publisher: bool = True) -> bool:

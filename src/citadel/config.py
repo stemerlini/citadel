@@ -42,12 +42,30 @@ class MetadataConfig:
 
 @dataclass
 class AccessConfig:
-    # Your library's sign-in for paywalled papers (see access.py). Empty name: pages open
-    # in your usual browser instead.
+    # Sign-ins for paywalled papers (see access.py): any university, company or publisher
+    # account, all kept in one browser of Citadel's own. None: pages open in your usual
+    # browser instead.
+    accounts: list = field(default_factory=list)  # {name, login_url, proxy}
+    browser: str = "chromium"
+    # One account, as written before accounts were a list: read as the first account.
     name: str = ""
     login_url: str = ""
     proxy: str = ""  # EZproxy-style prefix put before publisher links; empty for none
-    browser: str = "chromium"
+
+    def all(self) -> list[dict]:
+        """Every account: name, login_url and proxy, the old single one first."""
+        found = [{"name": self.name, "login_url": self.login_url, "proxy": self.proxy}]
+        found += [
+            {key: str(entry.get(key, "")) for key in ("name", "login_url", "proxy")}
+            for entry in self.accounts
+            if isinstance(entry, dict)
+        ]
+        names, accounts = set(), []
+        for account in found:
+            if account["name"] and account["name"].casefold() not in names:
+                names.add(account["name"].casefold())
+                accounts.append(account)
+        return accounts
 
 
 @dataclass
@@ -196,15 +214,15 @@ watch_interval = 30
 contact_email = ""
 
 [access]
-# Sign-in for paywalled papers through your library (`citadel login`, or L in the app).
-# Citadel opens publisher pages in its own Chromium profile, where you sign in once; a
-# PDF you download there goes straight into the inbox and is attached to its reference.
-# Empty name: pages open in your usual browser.
-# Imperial:   name = "imperial", login_url = "https://library-search.imperial.ac.uk/"
-# EZproxy library: also set proxy, e.g. "https://proxy.example.org/login?url="
-name = ""
-login_url = ""
-proxy = ""
+# Sign-ins for paywalled papers (🔑 or L in the app, `citadel login`): your university,
+# a company, a publisher account… Citadel opens publisher pages in a Chromium window of
+# its own, where you sign in to each once; they all share it, so a publisher sees every
+# access you have. A PDF you download there goes straight into the inbox. No accounts:
+# pages open in your usual browser. Set them in the app (Settings, S), or here:
+# [[access.accounts]]
+# name = "imperial"
+# login_url = "https://library-search.imperial.ac.uk/"
+# proxy = ""   # EZproxy prefix if the library uses one: "https://proxy.example.org/login?url="
 browser = "chromium"
 
 [convert]
@@ -270,16 +288,24 @@ def save_libraries(entries: list[dict], file: Path | None = None) -> None:
     _save(document, file)
 
 
-def save_access(
-    name: str, login_url: str, proxy: str = "", browser: str = "", file: Path | None = None
-) -> None:
-    """Write the library sign-in set in the app; an empty name turns it off."""
+def save_access(accounts: list[dict], browser: str = "", file: Path | None = None) -> None:
+    """Write the sign-in accounts set in the app (none turns sign-in off)."""
     file = file or paths.CONFIG_FILE
     document = _document(file)
     if "access" not in document:
         document["access"] = tomlkit.table()
     section = document["access"]
-    section["name"], section["login_url"], section["proxy"] = name, login_url, proxy
+    for key in ("name", "login_url", "proxy", "accounts"):  # the old single account too
+        section.pop(key, None)
     if browser:
         section["browser"] = browser
+    if accounts:
+        table = tomlkit.aot()
+        for account in accounts:
+            entry = tomlkit.table()
+            entry["name"], entry["login_url"] = account["name"], account["login_url"]
+            if account.get("proxy"):
+                entry["proxy"] = account["proxy"]
+            table.append(entry)
+        section["accounts"] = table
     _save(document, file)
