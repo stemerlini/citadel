@@ -12,6 +12,8 @@ import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import tomlkit
+
 from . import paths
 from .library import Library
 
@@ -150,7 +152,8 @@ class Config:
 
 
 TEMPLATE = """\
-# Citadel settings. Edit freely: Citadel never rewrites this file.
+# Citadel settings. Edit freely: the app changes only what you set in its Settings
+# (S): the libraries and the sign-in. Comments are kept.
 
 # The library folder (PDFs, Markdown, figures). Syncs through OneDrive.
 library = "{library}"
@@ -217,3 +220,56 @@ def write_default(file: Path | None = None, library: Path | None = None) -> bool
     file.parent.mkdir(parents=True, exist_ok=True)
     file.write_text(TEMPLATE.format(library=library or paths.DEFAULT_LIBRARY))
     return True
+
+
+def _document(file: Path) -> tomlkit.TOMLDocument:
+    if file.exists():
+        return tomlkit.parse(file.read_text())
+    return tomlkit.parse(TEMPLATE.format(library=paths.DEFAULT_LIBRARY))
+
+
+def _save(document: tomlkit.TOMLDocument, file: Path) -> None:
+    file.parent.mkdir(parents=True, exist_ok=True)
+    temporary = file.with_name(f".{file.name}.tmp")
+    temporary.write_text(tomlkit.dumps(document))
+    temporary.replace(file)
+
+
+def _home_relative(path: str) -> str:
+    resolved = Path(path).expanduser()
+    try:
+        return "~/" + resolved.relative_to(Path.home()).as_posix()
+    except ValueError:
+        return str(resolved)
+
+
+def save_libraries(entries: list[dict], file: Path | None = None) -> None:
+    """Write the libraries chosen in the app as [[libraries]] (name, path), in order:
+    the first is the default. The rest of the file, comments included, is kept."""
+    file = file or paths.CONFIG_FILE
+    document = _document(file)
+    tables = tomlkit.aot()
+    for entry in entries:
+        table = tomlkit.table()
+        table["name"] = entry["name"]
+        table["path"] = _home_relative(entry["path"])
+        tables.append(table)
+    if entries:
+        document["library"] = _home_relative(entries[0]["path"])
+    document["libraries"] = tables
+    _save(document, file)
+
+
+def save_access(
+    name: str, login_url: str, proxy: str = "", browser: str = "", file: Path | None = None
+) -> None:
+    """Write the library sign-in set in the app; an empty name turns it off."""
+    file = file or paths.CONFIG_FILE
+    document = _document(file)
+    if "access" not in document:
+        document["access"] = tomlkit.table()
+    section = document["access"]
+    section["name"], section["login_url"], section["proxy"] = name, login_url, proxy
+    if browser:
+        section["browser"] = browser
+    _save(document, file)

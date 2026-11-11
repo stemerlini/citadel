@@ -105,6 +105,13 @@ While converting, a card on the desktop shows the progress and the GPU at work
 citadel          # opens the TUI
 ```
 
+The first time, it asks where your library should live: it lists the synced folders it
+finds (OneDrive, Dropbox…, also under `~/Cloud`) and `~/Citadel` on this computer only, and
+names the library **Personal**. **Settings** (`S`) adds more folders, each with a name
+of your own (Work, Local…) shown as its tag, and sets the optional paywall sign-in.
+Settings are saved to `data/config.toml`, comments kept. Colours follow the Omarchy
+theme; elsewhere Citadel uses Omarchy's default, Tokyo Night.
+
 | Key | Action | Key | Action |
 |---|---|---|---|
 | `Space` | preview: PDF page + details (`←/→` pages, `Tab` full text) | `Enter` | open the PDF |
@@ -115,7 +122,8 @@ citadel          # opens the TUI
 | `i` | review queue (`a` accept, `t` other topic, `d` DOI, `x` reject, `v` mark, `R` retry) | `D` | duplicates: keep one copy |
 | `f` | citation tree: references / cited by, step in (`Enter`) and back (`←`), `a` add | | |
 | `w` | open the publisher page (DOI) | `g` | Google search for the paper |
-| `L` | sign in to your library (paywalled papers) | `?` | about |
+| `L` / 🔑 | sign in to your library (paywalled papers) | `S` | settings: libraries, sign-in |
+| `?` | about | | |
 
 No PDF for a reference (MD column `—`)? Press `w` (or `g`), download it with your
 institutional access, and drop it into `_inbox/`: Citadel recognises it and attaches it to
@@ -123,9 +131,10 @@ that reference. `citadel attach CITEKEY file.pdf` does the same by hand.
 
 ### Paywalled papers: library sign-in
 
-Set `[access]` in the config (Imperial: `name = "imperial"`,
-`login_url = "https://library-search.imperial.ac.uk/"`) and run `citadel login` (or `L`)
-once to sign in. From then on `w`, `g` and `citadel web` open pages in Citadel's own
+Optional. Set it up in Settings (`S`, then `s`), or by clicking 🔑 in the top bar:
+your institution's name and sign-in page (Imperial:
+`https://library-search.imperial.ac.uk/`), then sign in once with 🔑 (or `L`,
+`citadel login`). From then on `w`, `g` and `citadel web` open pages in Citadel's own
 Chromium profile, signed in to your library, and every download there lands in
 `_inbox/`. On a publisher's page, use "Access through your institution" the first time,
 then click the PDF button: the watcher attaches the file to its reference. You do the

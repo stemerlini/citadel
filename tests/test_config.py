@@ -51,3 +51,22 @@ def test_relative_converter_is_inside_app_root():
     from citadel import paths
 
     assert Config().convert_python == paths.ROOT / ".venv-convert/bin/python"
+
+
+def test_settings_from_the_app_keep_the_rest_of_the_file(tmp_path, monkeypatch):
+    from citadel.config import save_access, save_libraries, write_default
+
+    monkeypatch.delenv("CITADEL_LIBRARY", raising=False)
+    file = tmp_path / "config.toml"
+    write_default(file)
+    save_libraries(
+        [{"name": "Personal", "path": str(tmp_path / "a")}, {"name": "Work", "path": "/w"}],
+        file,
+    )
+    save_access("imperial", "https://library-search.imperial.ac.uk/", browser="chrome", file=file)
+    save_libraries([{"name": "Work", "path": "/w"}], file)
+    text = file.read_text()
+    assert "# Confidence needed to file a new item" in text
+    config = Config.load(file)
+    assert [(lib.name, str(lib.root)) for lib in config.libraries()] == [("Work", "/w")]
+    assert (config.access.name, config.access.browser) == ("imperial", "chrome")

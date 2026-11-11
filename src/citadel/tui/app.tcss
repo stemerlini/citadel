@@ -31,6 +31,13 @@ Screen {
     width: auto;
     padding: 1 2 0 2;
 }
+#signin {
+    width: auto;
+    padding: 1 2 0 1;
+}
+#signin:hover {
+    background: $primary 20%;
+}
 
 /* -- body ----------------------------------------------------------------- */
 
