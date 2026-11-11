@@ -153,7 +153,9 @@ Chromium profile, signed in to your library, and every download there lands in
 `_inbox/`. On a publisher's page, use "Access through your institution" the first time,
 then click the PDF button: the watcher attaches the file to its reference. You do the
 clicking and Citadel never sees your password; the session stays in
-`data/browser/<name>/` on this machine. For a library that uses EZproxy, also set
+`data/browser/<name>/` on this machine. That profile reopens where it left off, so the
+sign-in survives closing the window; on Microsoft's sign-in page answer **Yes** to
+"Stay signed in?". For a library that uses EZproxy, also set
 `proxy` to its prefix and publisher links go through it.
 
 Slides, posters, books, standards and reports stay filed under their topic and are also

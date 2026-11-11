@@ -9,7 +9,8 @@ recognises the file and attaches it to its reference (ingest.Ingester._complete)
 
 You do the clicking. Citadel opens pages in an ordinary browser window and never
 drives the publisher's site, so their access terms and bot checks are respected.
-Citadel never sees your password: the session lives in the browser profile.
+Citadel never sees your password: the session lives in the browser profile, which
+reopens where it left off so that sign-in sessions survive closing the window.
 
 Two kinds of library sign-in work this way:
 - Single sign-on (Imperial, UK Federation): sign in to the library once; on a
@@ -59,6 +60,9 @@ def prepare(profile: Path, inbox: Path) -> None:
     download.update(default_directory=str(inbox), prompt_for_download=False, directory_upgrade=True)
     prefs.setdefault("savefile", {})["default_directory"] = str(inbox)
     prefs.setdefault("plugins", {})["always_open_pdf_externally"] = True
+    # "Continue where you left off": the only way Chromium keeps session cookies when the
+    # window closes, and library and publisher sign-ins are mostly session cookies.
+    prefs.setdefault("session", {})["restore_on_startup"] = 1
     file.parent.mkdir(parents=True, exist_ok=True)
     file.write_text(json.dumps(prefs))
 

@@ -44,6 +44,7 @@ def test_prepare_sends_downloads_to_the_inbox_and_keeps_other_prefs(tmp_path):
     assert prefs["download"]["default_directory"] == str(inbox)
     assert prefs["download"]["prompt_for_download"] is False
     assert prefs["plugins"]["always_open_pdf_externally"] is True
+    assert prefs["session"]["restore_on_startup"] == 1  # keeps the sign-in's session cookies
     assert prefs["keep"] == 1
 
 
