@@ -79,6 +79,17 @@ def test_confident_file_is_filed_and_indexed(setup):
     assert row["has_pdf"] == 1 and row["data"]["source"] == "inbox"
 
 
+def test_review_all_holds_a_confident_file_until_accepted(setup):
+    ingester, library, index, _ = setup
+    ingester.config.ingest.review_all = True
+    drop(library)
+    [result] = ingester.process_inbox()
+    assert result.status == "review" and "ready to file" in result.reason
+    assert index.get("settles2017review") is None
+    filed = ingester.accept(f"{REVIEW_NAME}.pdf")
+    assert filed.status == "filed"
+
+
 def test_low_confidence_goes_to_review_with_a_proposal(setup):
     ingester, library, _, state = setup
     state["confidence"] = 0.5

@@ -113,6 +113,9 @@ def copy_text(app: App, text: str) -> None:
     app.copy_to_clipboard(text)
 
 
+INBOX_SETTLE = 5  # seconds: i reads a file once its download has finished
+
+
 class Citadel(App):
     TITLE = "Citadel"
     CSS_PATH = Path(__file__).with_name("app.tcss")
@@ -651,6 +654,53 @@ class Citadel(App):
         )
 
     def action_review(self) -> None:
+        """Read what is new in the inbox, then show everything waiting for review."""
+        if self.inbox_files():
+            self.notify("Reading the inbox…")
+            self.read_inbox()
+        else:
+            self.open_review()
+
+    def inbox_files(self) -> list[Path]:
+        inbox = self.library.inbox
+        if not inbox.is_dir():
+            return []
+        return [p for p in inbox.iterdir() if p.is_file() and not p.name.startswith(".")]
+
+    @work(thread=True, group="ingest")
+    def read_inbox(self) -> None:
+        """Identify the inbox files (each lands in review, or is filed when confident and
+        review_all is off), as `citadel ingest` does."""
+        from ..ingest import Ingester
+        from ..sources import Http
+
+        with self.ingest_lock:
+            index = self.open_index()
+            try:
+                ingester = Ingester(
+                    self.library, index, Http(self.config.metadata.contact_email), self.config
+                )
+                results = ingester.process_inbox(settle=INBOX_SETTLE)
+            except OSError as error:
+                self.call_from_thread(self.notify, str(error), severity="error")
+                results = []
+            finally:
+                index.close()
+        filed = [r for r in results if r.status == "filed"]
+        left = len(self.inbox_files())
+        summary = f"Inbox read: {len(results) - len(filed)} to review"
+        if filed:
+            summary += f", {len(filed)} filed"
+        if left:
+            summary += f"; {left} not ready yet (still downloading or uploading), press i again"
+        self.call_from_thread(self.notify, summary, severity="warning" if left else "information")
+        self.call_from_thread(self.reload)
+        self.call_from_thread(self.open_review)
+
+    def open_review(self) -> None:
+        if isinstance(self.screen, ReviewScreen):
+            self.screen.refresh_items(self.review_items())
+            return
         self.push_screen(
             ReviewScreen(
                 self.review_items(),
