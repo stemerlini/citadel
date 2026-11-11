@@ -140,9 +140,9 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         report["claims"] = claimer.backend
         report["leftovers"] = [str(p) for p in claimer.leftovers()]
         report["stale_claims"] = [str(p) for p in claimer.stale()]
-        if claimer.backend != "omadrive":
+        if claimer.backend != "onedrive":
             notes.append(
-                f"{named}inbox claims are local renames (not in a OneDrive folder omadrive knows): "
+                f"{named}inbox claims are local renames (not on an rclone mount of OneDrive): "
                 "safe with one watcher only"
             )
         if report["leftovers"]:

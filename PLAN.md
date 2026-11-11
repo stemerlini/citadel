@@ -37,7 +37,7 @@ Omarchy machines through pull requests on GitHub (`stemerlini/citadel`, private)
 | Zotero | Out of scope for now |
 | Stack | Python + Textual + textual-image (same as Toploader), SQLite index, pytest, ruff |
 | Paywalled papers | Library sign-in in Citadel's own Chromium profile (Imperial SSO now; an EZproxy prefix for libraries such as BnL). The user clicks the PDF; Citadel never drives publisher sites (2026-11-08) |
-| Maintenance | GitHub, private; every change through a pull request; any number of inbox watchers, each inbox file claimed atomically through omadrive (2026-11-09; was one watcher, 2026-11-08) |
+| Maintenance | GitHub, private; every change through a pull request; any number of inbox watchers, each inbox file claimed atomically on OneDrive, found from the library folder's rclone mount (2026-11-11; was one watcher, 2026-11-08) |
 | Libraries | Several (e.g. Personal, SES on the work account), searched as one through one local index with a `library` column; files never cross libraries (2026-11-09) |
 | Environments | App: system Python 3.14 in `.venv`. Marker: its own Python 3.13 env (`.venv-convert`, via mise) run as a worker subprocess, because Marker pins `pillow<11` (no 3.14 wheel) and drags in PyTorch |
 
@@ -204,10 +204,12 @@ _inbox/file ─▶ 1 identify ─▶ 2 metadata ─▶ 3 decide ─▶ 4 file �
 inotify does not see changes that arrive through rclone from other devices.
 
 **Claims (2026-11-09).** Before a file is ingested it is claimed: moved into
-`_inbox/.claimed/<host>/`. In a OneDrive folder omadrive knows (an rclone mount it manages) the move
-is `omadrive agent claim`, a server-side move conditional on the item's eTag, so of
+`_inbox/.claimed/<host>/`. When the library folder is on an rclone mount of a OneDrive
+remote (read from `/proc/self/mountinfo`), Citadel itself makes the move on OneDrive,
+conditional on the item's eTag (Microsoft Graph, with the token rclone keeps), so of
 several watchers exactly one wins and the others skip the file (taken; or pending while
-it is still uploading). Elsewhere it is a local rename, safe on one machine only (a
+it is still uploading, asked of the mount's `--rc` when it has one). Citadel does not
+depend on omadrive, which stays a file manager (2026-11-11). Elsewhere it is a local rename, safe on one machine only (a
 warning says so). A host finishes its own leftovers on restart; another host's claims older than 24 h
 are listed by `citadel doctor`, never taken over.
 

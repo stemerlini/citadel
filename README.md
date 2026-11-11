@@ -58,10 +58,10 @@ not mounted) is skipped and shown by `citadel doctor`. After adding one:
 
 The library is shared through OneDrive; each machine keeps its own index. The inbox
 watcher can run on every machine: before filing a PDF a watcher claims it, moving it
-into `_inbox/.claimed/<host>/`. When the library is in a
-OneDrive folder that [omadrive](https://github.com/stemerlini/omadrive) knows (its
-rclone mounts) the claim is a server-side move guarded by the file's eTag, so only one
-machine wins. Elsewhere it is only a local rename: keep the watcher on one machine there (`--no-watch` on the others; later
+into `_inbox/.claimed/<host>/`. When the library folder is
+on an rclone mount of OneDrive (`rclone mount onedrive-personal: ~/OneDrive-Personal`),
+Citadel makes the claim on OneDrive itself, a move guarded by the file's eTag, so only
+one machine wins. Elsewhere it is only a local rename: keep the watcher on one machine there (`--no-watch` on the others; later
 runs of the installer keep it off, `--watch` turns it back on).
 
 ```sh

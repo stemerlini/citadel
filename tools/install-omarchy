@@ -4,8 +4,8 @@
 # plugin), and for agents the skill and MCP server (Claude Code and Copilot CLI). Safe to run again, e.g. after pulling changes or moving the project.
 # Your library on OneDrive is never touched. Undo with tools/uninstall-omarchy.
 set -euo pipefail
-# Watchers on several machines claim each inbox PDF atomically through omadrive, so
-# any number can run when the library is in a OneDrive folder omadrive knows:
+# Watchers on several machines claim each inbox PDF atomically on OneDrive, so any
+# number can run when the library folder is on an rclone mount of OneDrive:
 #   --no-watch  turn it off on this machine; later runs keep it off
 #   --watch     turn it back on
 

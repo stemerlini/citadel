@@ -116,7 +116,7 @@ class Ingester:
 
     @property
     def claimer(self) -> Claimer:
-        if self._claimer is None:  # asks findmnt which filesystem the inbox is on
+        if self._claimer is None:  # looks up the rclone mount the inbox is on
             self._claimer = Claimer(self.library.inbox)
         return self._claimer
 

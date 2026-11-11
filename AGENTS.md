@@ -55,9 +55,11 @@ index (`citadel reindex`) and keeps its own sign-in (`citadel login`).
 - Publisher sites: Citadel opens pages for the user to click (`access.py`). It never
   drives a publisher's site or gets around its bot checks.
 - The topic tree (`src/citadel/topics.toml`) changes only with the owner's approval.
-- Any number of inbox watchers: inbox files are claimed atomically through omadrive
-  (`omadrive agent claim`, `claim.py`) before they are filed. When the library is not
-  in a OneDrive folder omadrive knows, the claim is only a local rename, so there keep
+- Any number of inbox watchers: inbox files are claimed atomically before they are
+  filed (`claim.py`). Citadel is standalone: it looks up the rclone mount holding the
+  library folder (`/proc/self/mountinfo`) and, for a OneDrive remote, moves the file on
+  OneDrive with an eTag-guarded Graph call using rclone's own sign-in. When the library
+  is not on an rclone mount of OneDrive, the claim is only a local rename, so there keep
   one watcher (`--no-watch` elsewhere).
 - Libraries never mix: a file is filed in the library whose inbox it came from, and
   nothing is copied, moved or deleted from one library into another (a work library
