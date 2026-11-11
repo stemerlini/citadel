@@ -26,6 +26,7 @@ class ObsidianConfig:
 class IngestConfig:
     review_threshold: float = 0.8  # metadata confidence needed to file without review
     topic_threshold: float = 0.6  # topic confidence needed to file without review
+    review_all: bool = False  # inbox files always wait in review, however confident
     settle_seconds: int = 60  # leave files this recently changed alone (still downloading)
     watch_interval: int = 30  # seconds between inbox polls (inotify misses rclone changes)
 
@@ -173,6 +174,9 @@ notes_folder = "Literature"
 [ingest]
 # Confidence needed to file a new item without asking: for its metadata, and for
 # its topic folder. Below either, it waits in _review/ with a proposal.
+# review_all = true: every inbox file waits in review, however confident; you file it
+# by accepting it (i in the app, or `citadel accept`).
+review_all = false
 review_threshold = 0.8
 topic_threshold = 0.6
 # Files changed less than this many seconds ago are left alone (still downloading).

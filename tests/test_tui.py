@@ -138,6 +138,29 @@ def test_table_layout_drops_columns_when_narrow():
     assert "topic" not in narrow and "type" not in narrow and narrow["title"] >= 24
 
 
+async def test_review_key_reads_the_inbox_first(make_app, monkeypatch):
+    from citadel.ingest import Ingester, Result
+    from citadel.tui.screens import ReviewScreen
+
+    app, _ = make_app()
+    read = []
+
+    def fake_process(self, dry_run=False, settle=None):
+        for path in self.library.inbox.iterdir():
+            read.append(path.name)
+            path.unlink()
+        return [Result(name, "review", "ready to file: accept it") for name in read]
+
+    monkeypatch.setattr(Ingester, "process_inbox", fake_process)
+    async with app.run_test(size=(140, 40)) as pilot:
+        (app.library.inbox / "new.pdf").write_bytes(b"%PDF")
+        await pilot.press("i")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        assert read == ["new.pdf"]
+        assert isinstance(app.screen, ReviewScreen)
+
+
 async def test_review_marks_and_batch_topic(make_app):
     from citadel.ingest import Proposal
     from citadel.tui.screens import ReviewScreen
