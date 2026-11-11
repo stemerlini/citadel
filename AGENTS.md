@@ -5,6 +5,8 @@ agents. GitHub (`stemerlini/citadel`, private) is where the machines meet: every
 reaches `main` through a pull request, so any agent on any machine can pick up from it.
 
 - [README.md](README.md): what Citadel does, for the user.
+- [INSTALL-LINUX.md](INSTALL-LINUX.md): installing on Ubuntu or another Linux without
+  Omarchy, step by step for an agent. Keep it in step with `tools/install-omarchy`.
 - [PLAN.md](PLAN.md): design, decisions taken, phases and status. Read the
   *Decisions taken* table and the *Status* line before changing behaviour.
 
