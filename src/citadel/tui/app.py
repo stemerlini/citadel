@@ -145,6 +145,7 @@ class Citadel(App):
         self.config = config or Config.load()
         self.libraries = self.config.libraries()
         self.library = self.libraries[0]  # where the TUI adds and reviews
+        self.index_file = index.file if index else paths.INDEX_FILE
         self.index = index or self.open_index()
         self.view = ("view", "all")
         self.query_text = ""
@@ -193,15 +194,30 @@ class Citadel(App):
         tree = self.query_one("#topics", Tree)
         tree.show_root = False
         tree.guide_depth = 2
-        self.reload()
+        self.reload(scan=False)  # what the index already knows, at once
         self.query_one("#refs", DataTable).focus()
         self.set_interval(1.5, self.refresh_activity)
+        self.reindex_in_background()
+
+    @work(thread=True, exclusive=True, group="reindex")
+    def reindex_in_background(self) -> None:
+        """Catch up with the library files. On a OneDrive mount every changed record
+        is downloaded first, which may take minutes: the list stays usable meanwhile."""
+        if not self.available():
+            return
+        index = self.open_index()
+        try:
+            report = index.reindex()
+        finally:
+            index.close()
+        if report.added or report.updated or report.removed:
+            self.call_from_thread(lambda: self.reload(self.current_key(), scan=False))
 
     # -- data -> widgets ---------------------------------------------------------------
 
     def open_index(self) -> Index:
         """A connection over every library (one per worker thread)."""
-        return Index(paths.INDEX_FILE, self.libraries)
+        return Index(self.index_file, self.libraries)
 
     def available(self) -> list[Library]:
         return [library for library in self.libraries if library.exists()]
@@ -217,8 +233,8 @@ class Citadel(App):
                 return Text(library.tag, style=f"bold {self.tones[tones[number % len(tones)]]}")
         return Text(name[:3], style="dim")
 
-    def reload(self, keep: str | None = None) -> None:
-        if self.available():
+    def reload(self, keep: str | None = None, scan: bool = True) -> None:
+        if scan and self.available():
             self.index.reindex()
         self.all_rows = self.index.list()
         self.duplicate_groups = self.find_duplicates()

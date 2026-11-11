@@ -38,6 +38,7 @@ def make_app(tmp_path, monkeypatch):
 
     def build():
         index = Index(tmp_path / "index.db", root)
+        index.reindex()  # the app opens on what the index already knows
         return Citadel(config=config, index=index), copied
 
     return build
@@ -357,3 +358,12 @@ async def test_w_and_g_open_the_paper_online(make_app, monkeypatch):
         await pilot.press("g")
         assert opened[-1].startswith("https://www.google.com/search?q=")
         assert "No PDF yet" in str(app.query_one("#details").render())
+
+
+async def test_opens_at_once_and_catches_up_with_the_library_in_the_background(make_app, tmp_path):
+    app, _ = make_app()
+    file_ref(tmp_path / "lib", make_ref(citekey="late2024arrival", title="A late arrival"))
+    async with app.run_test(size=(140, 40)) as pilot:
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        assert "late2024arrival" in {row["citekey"] for row in app.rows}
