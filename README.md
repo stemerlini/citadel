@@ -71,7 +71,9 @@ gh repo clone stemerlini/citadel ~/Projects/citadel
 citadel reindex   # builds this machine's index from the library
 ```
 
-Elsewhere, with [uv](https://docs.astral.sh/uv/) and access to this repository:
+On Ubuntu or another Linux without Omarchy, an agent can follow
+[INSTALL-LINUX.md](INSTALL-LINUX.md) step by step. In short, with
+[uv](https://docs.astral.sh/uv/) and access to this repository:
 
 ```sh
 uv tool install git+https://github.com/stemerlini/citadel   # `uv tool upgrade citadel` later
