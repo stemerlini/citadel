@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import subprocess
+import threading
 from pathlib import Path
 
 from .. import paths
@@ -23,7 +25,8 @@ def page_image(pdf: Path, page: int) -> Path | None:
     if target.exists():
         return target
     folder.mkdir(parents=True, exist_ok=True)
-    stem = folder / f".{key}-{page}"
+    # Its own scratch name: the same page may be rendered twice at once (flipping fast).
+    stem = folder / f".{key}-{page}-{os.getpid()}-{threading.get_ident()}"
     try:
         subprocess.run(
             [
@@ -46,7 +49,8 @@ def page_image(pdf: Path, page: int) -> Path | None:
     except (OSError, subprocess.SubprocessError):
         return None
     rendered = stem.with_name(stem.name + ".png")
-    if not rendered.exists():
-        return None
-    rendered.replace(target)
+    try:
+        rendered.replace(target)
+    except OSError:
+        return target if target.exists() else None
     return target

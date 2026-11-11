@@ -505,3 +505,30 @@ async def test_references_still_loading_are_greyed_out_until_read(make_app, monk
         await pilot.pause()
         assert not app.loading and table.get_row_at(0)[title].style != LOADING_STYLE
         assert app.check_action("open_pdf", ()) is True
+
+
+def test_a_page_rendered_twice_at_once_does_not_crash(tmp_path, monkeypatch):
+    import threading
+
+    from citadel.tui import pages
+
+    monkeypatch.setattr(pages.paths, "CACHE_DIR", tmp_path / "cache")
+    pdf = tmp_path / "book.pdf"
+    pdf.write_bytes(b"%PDF")
+    both = threading.Barrier(2)
+
+    def pdftoppm(argv, **kw):  # both renders write their file before either moves it
+        with open(argv[-1] + ".png", "wb") as png:
+            png.write(b"png")
+        both.wait(timeout=5)
+
+    monkeypatch.setattr(pages.subprocess, "run", pdftoppm)
+    results = []
+    threads = [
+        threading.Thread(target=lambda: results.append(pages.page_image(pdf, 1))) for _ in range(2)
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert len(results) == 2 and all(r and r.exists() for r in results)
