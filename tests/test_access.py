@@ -4,14 +4,27 @@ from citadel import access
 from citadel.config import AccessConfig, Config
 
 
-def test_config_section_round_trips():
+def test_accounts_and_the_old_single_sign_in_are_read():
     config = Config.from_dict(
-        {"access": {"name": "imperial", "login_url": "https://login.example/", "x": 1}}
+        {
+            "access": {
+                "name": "imperial",
+                "login_url": "https://login.example/",
+                "accounts": [{"name": "ieee", "login_url": "https://ieee.example/"}, "junk"],
+            }
+        }
     )
-    assert config.access.name == "imperial"
-    assert config.access.login_url == "https://login.example/"
+    assert [a["name"] for a in config.access.all()] == ["imperial", "ieee"]
+    assert access.account(config.access, "IEEE")["login_url"] == "https://ieee.example/"
     assert config.access.browser == "chromium"
     assert not access.enabled(Config().access)
+
+
+def test_the_old_per_library_profile_becomes_the_shared_one(monkeypatch, tmp_path):
+    monkeypatch.setattr(access.paths, "DATA_DIR", tmp_path)
+    (tmp_path / "browser" / "imperial" / "Default").mkdir(parents=True)
+    assert access.profile_dir() == tmp_path / "browser" / "citadel"
+    assert (tmp_path / "browser" / "citadel" / "Default").is_dir()
 
 
 def test_proxy_prefixes_publisher_links_only(monkeypatch, tmp_path):
@@ -56,7 +69,7 @@ def test_prepare_leaves_a_running_profile_alone(tmp_path):
     assert not (profile / "Default").exists()
 
 
-def test_launch_uses_the_library_profile(monkeypatch, tmp_path):
+def test_launch_uses_the_shared_profile(monkeypatch, tmp_path):
     calls = []
     monkeypatch.setattr(access.paths, "DATA_DIR", tmp_path / "data")
     monkeypatch.setattr(access.subprocess, "Popen", lambda argv, **kw: calls.append(argv))
@@ -64,5 +77,5 @@ def test_launch_uses_the_library_profile(monkeypatch, tmp_path):
     assert access.login(imperial, tmp_path / "_inbox")
     argv = calls[0]
     assert argv[0] == "chromium"
-    assert f"--user-data-dir={tmp_path / 'data' / 'browser' / 'imperial'}" in argv
+    assert f"--user-data-dir={tmp_path / 'data' / 'browser' / 'citadel'}" in argv
     assert argv[-1] == "https://library.example/"

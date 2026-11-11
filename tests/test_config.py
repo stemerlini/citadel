@@ -63,10 +63,12 @@ def test_settings_from_the_app_keep_the_rest_of_the_file(tmp_path, monkeypatch):
         [{"name": "Personal", "path": str(tmp_path / "a")}, {"name": "Work", "path": "/w"}],
         file,
     )
-    save_access("imperial", "https://library-search.imperial.ac.uk/", browser="chrome", file=file)
+    imperial = {"name": "imperial", "login_url": "https://library-search.imperial.ac.uk/"}
+    save_access([imperial, {"name": "ieee", "login_url": "https://ieee.example/"}], "chrome", file)
     save_libraries([{"name": "Work", "path": "/w"}], file)
     text = file.read_text()
     assert "# Confidence needed to file a new item" in text
     config = Config.load(file)
     assert [(lib.name, str(lib.root)) for lib in config.libraries()] == [("Work", "/w")]
-    assert (config.access.name, config.access.browser) == ("imperial", "chrome")
+    assert [a["name"] for a in config.access.all()] == ["imperial", "ieee"]
+    assert config.access.browser == "chrome"

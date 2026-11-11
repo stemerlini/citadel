@@ -124,8 +124,10 @@ Other terminals (GNOME Terminal) fall back to coarse block previews.
 
 ## 5. Library sign-in for paywalled papers (optional)
 
-Ask the user for their institution's library sign-in page. Then set `[access]` in the
-config (`name`, `login_url`, and `proxy` for an EZproxy prefix) and run `citadel login`.
+The user adds their accounts in the app: 🔑 in the top bar (or `L`), then `a` for each
+(a university library, a company, a publisher account) with its sign-in page, and Enter
+signs in. Without the app: add `[[access.accounts]]` entries (`name`, `login_url`, and
+`proxy` for an EZproxy prefix) to the config and run `citadel login [name]`.
 The user signs in themselves. Citadel only opens pages: it never types credentials or
 drives publisher sites.
 
