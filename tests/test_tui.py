@@ -84,6 +84,7 @@ async def test_copy_and_status(make_app):
         assert copied[-1].startswith("Verma, M. K. (2004).")
         await pilot.press("k")
         assert copied[-1] == "verma2004statistical"
+        app.index.reindex = None  # the UI thread never rereads the whole library
         await pilot.press("r")
         await pilot.pause()
         assert app.index.get("verma2004statistical")["status"] == "reading"

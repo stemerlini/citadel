@@ -408,13 +408,27 @@ class Citadel(App):
         return Text(name[:3], style="dim")
 
     def reload(self, keep: str | None = None, scan: bool = True) -> None:
-        if scan and self.available():
-            self.index.reindex()
+        """Show what the index knows; scan: then catch up with the library files in the
+        background (on a OneDrive mount that reads every record, too slow for the UI)."""
         self.all_rows = self.index.list()
         self.refresh_duplicates()
         self.refresh_stats()
         self.refresh_tree()
         self.refresh_table(keep)
+        if scan:
+            self.rescan()
+
+    @work(thread=True, group="rescan")
+    def rescan(self) -> None:
+        if not self.available():
+            return
+        index = self.open_index()
+        try:
+            report = index.reindex()
+        finally:
+            index.close()
+        if report.added or report.updated or report.removed:
+            self.call_from_thread(self.after_reindex)
 
     def refresh_stats(self) -> None:
         total = len(self.all_rows)
