@@ -30,6 +30,6 @@ CACHE_DIR = ROOT / "cache"
 CONFIG_FILE = DATA_DIR / "config.toml"
 INDEX_FILE = DATA_DIR / "index.db"
 
-DEFAULT_LIBRARY = Path.home() / "Cloud" / "Personal-OneDrive" / "Citadel"
+DEFAULT_LIBRARY = Path.home() / "Citadel-personal"
 
 USER_AGENT = "citadel/0.1 (personal reference library)"

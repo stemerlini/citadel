@@ -33,22 +33,28 @@ apps-menu entry with icon, the inbox watcher (systemd user service
 `smerlini.citadel`). `tools/uninstall-omarchy` removes all of it; the library is
 never touched.
 
-The library defaults to `~/Cloud/Personal-OneDrive/Citadel`; change `library` in
-`data/config.toml` (or set `CITADEL_LIBRARY`). The topic tree lives in the
+A library is a folder named `Citadel-<tag>`, always lower case: `Citadel-personal`,
+`Citadel-work`, `Citadel-local`. The tag comes from the folder name, not from the drive
+it sits on, and the TUI marks each reference with the tag's first letter (`p`, `w`, `l`),
+so no two tags may start with the same letter. Set it up in the app (below), or change
+`library` in `data/config.toml` (or set `CITADEL_LIBRARY`). The topic tree lives in the
 library's `topics.toml`.
 
-Several libraries (say a personal one and one on a work OneDrive) are searched as one;
-each reference shows which library it is in (`P`, `SES`…). Files never move between
-them: each library has its own inbox, review queue, topics and `library.bib`.
+Several libraries (say a personal one and one on a work OneDrive) are searched as one.
+Files never move between them: each library has its own inbox, review queue, topics and
+`library.bib`.
 
 ```toml
 [[libraries]]
-name = "Personal"
-path = "/home/me/OneDrive-Personal/Citadel"
+path = "/home/me/OneDrive-Personal/Citadel-personal"
 [[libraries]]
-name = "SES"
-path = "/home/me/OneDrive-SES/Citadel"
+path = "/home/me/OneDrive-SES/Citadel-work"
 ```
+
+An older folder named otherwise (`Citadel`) still works; the app offers once to rename
+it `Citadel-<tag>`. On OneDrive the rename is made on OneDrive itself (after any
+uploads finish, guarded against a concurrent change), and another computer whose config
+still points at the old name follows the new folder by itself.
 
 The first library is the default for `add`. A library whose folder is missing (account
 not mounted) is skipped and shown by `citadel doctor`. After adding one:
@@ -74,7 +80,7 @@ Elsewhere, with [uv](https://docs.astral.sh/uv/) and access to this repository:
 
 ```sh
 uv tool install git+https://github.com/stemerlini/citadel   # `uv tool upgrade citadel` later
-citadel init --library ~/OneDrive/Citadel                  # wherever OneDrive syncs it
+citadel init --library ~/OneDrive/Citadel-personal                # wherever OneDrive syncs it
 citadel reindex   # builds this machine's index from the library
 citadel           # the TUI; `citadel mcp` serves the library to agents
 ```
@@ -106,9 +112,11 @@ citadel          # opens the TUI
 ```
 
 The first time, it asks where your library should live: it lists the synced folders it
-finds (OneDrive, Dropbox…, also under `~/Cloud`) and `~/Citadel` on this computer only, and
-names the library **Personal**. **Settings** (`S`) adds more folders, each with a name
-of your own (Work, Local…) shown as its tag, and sets the optional paywall sign-in.
+finds (OneDrive, Dropbox…, also under `~/Cloud`), your home folder (this computer only)
+and any `Citadel-<tag>` library already there, and asks for a tag (`personal`). The folder
+is `<location>/Citadel-<tag>`. **Settings** (`S`) adds more libraries, each with its own
+tag (`work`, `local`…), renames a tag (and its folder, `e`), and sets the optional
+paywall sign-in.
 Settings are saved to `data/config.toml`, comments kept. Colours follow the Omarchy
 theme; elsewhere Citadel uses Omarchy's default, Tokyo Night.
 

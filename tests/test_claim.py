@@ -101,3 +101,46 @@ def test_backend_follows_the_rclone_mount_of_the_library(tmp_path, monkeypatch):
     assert Claimer(mount / "Citadel" / "_inbox").backend == "onedrive"
     monkeypatch.setattr(claim, "_remote_type", lambda remote: "drive")
     assert Claimer(mount / "Citadel" / "_inbox").backend == "local"
+
+
+def test_rename_folder_on_onedrive_waits_for_uploads_and_guards_the_etag(tmp_path):
+    import json
+
+    import pytest
+
+    mount = claim.Mount("onedrive-personal", "", tmp_path, rc="unix:///run/rc.sock")
+    folder = tmp_path / "Citadel"
+    (folder / "_inbox").mkdir(parents=True)
+    queue = [{"name": "Citadel/papers/x.pdf"}]
+    calls = []
+
+    def run(command, **kwargs):
+        if "vfs/queue" in command:
+            return subprocess.CompletedProcess(command, 0, json.dumps({"queue": queue}), "")
+        if "vfs/refresh" in command:  # the mount shows OneDrive's new name
+            folder.rename(folder.with_name("Citadel-personal"))
+        return subprocess.CompletedProcess(command, 0, "{}", "")
+
+    class Graph:
+        def sign_in(self):
+            pass
+
+        def call(self, verb, rel, query="", body=None, if_match=""):
+            calls.append((verb, rel, query, body, if_match))
+            return (200, {"id": "abc", "eTag": "v1"}) if verb == "GET" else (200, {})
+
+    claimer = Claimer(folder / "_inbox", backend="onedrive", mount=mount, graph=Graph(), run=run)
+    with pytest.raises(OSError, match="uploading"):
+        claim.rename_folder(folder, "Citadel-personal", claimer)
+    assert calls == [] and folder.is_dir()
+
+    queue.clear()
+    target = claim.rename_folder(folder, "Citadel-personal", claimer)
+    assert target == tmp_path / "Citadel-personal" and target.is_dir()
+    assert calls[-1] == (
+        "PATCH",
+        "items/abc",
+        "@microsoft.graph.conflictBehavior=fail",
+        {"name": "Citadel-personal"},
+        "v1",
+    )

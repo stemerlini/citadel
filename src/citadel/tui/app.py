@@ -29,6 +29,7 @@ from . import logo
 from .fields import Field
 from .screens import (
     AboutScreen,
+    ConfirmScreen,
     DuplicatesScreen,
     EditScreen,
     PreviewScreen,
@@ -211,6 +212,8 @@ class Citadel(App):
         self.set_interval(1.5, self.refresh_activity)
         if self.needs_setup:
             self.welcome()
+        else:
+            self.offer_standard_names()
 
     # -- setup: libraries and sign-in (Settings, S) ----------------------------------
 
@@ -222,7 +225,7 @@ class Citadel(App):
                 self.exit(message="Citadel needs a library folder: run it again to choose one.")
                 return
             self.needs_setup = False
-            self.save_libraries([result])
+            self.save_libraries([{"path": result["path"]}])
             self.notify(
                 f"Library ready: drop PDFs into {result['path']}/_inbox and press i. "
                 "More folders, and the paywall sign-in, in Settings (S).",
@@ -232,12 +235,64 @@ class Citadel(App):
         self.push_screen(
             LibraryForm(
                 "Welcome to Citadel",
-                name="Personal",
-                hint="Choose where your library lives: a folder on OneDrive (or another synced "
-                "drive) to have it on every computer, or one on this computer only.",
+                tag="personal",
+                hint="Choose where your library lives: on OneDrive (or another synced drive) "
+                "to have it on every computer, or on this computer only. Citadel keeps it in "
+                "a folder named after its tag, Citadel-personal.",
             ),
             chosen,
         )
+
+    def offer_standard_names(self) -> None:
+        """A library folder with an older name (Citadel): offer to rename it Citadel-<tag>."""
+        import os
+
+        from ..library import standard_folder
+
+        if os.environ.get("CITADEL_LIBRARY") or not paths.CONFIG_FILE.is_file():
+            return  # not from the config file, so there is nothing to point at the new name
+        for library in self.libraries:
+            target = standard_folder(library.root, library.name)
+            if target != library.root and library.root.is_dir():
+                question = (
+                    f"Library folders are now named after their tag. Rename "
+                    f"{library.root} to {target.name}? On OneDrive it is renamed there, and "
+                    "other computers follow when Citadel starts. Nothing inside changes."
+                )
+                self.push_screen(
+                    ConfirmScreen(question),
+                    lambda yes, library=library: yes and self.rename_library(library),
+                )
+                return  # one at a time; the next is offered at the next start
+
+    @work(thread=True, group="ingest")
+    def rename_library(self, library: Library, tag: str = "", after=None) -> None:
+        """Rename a library's folder to Citadel-<tag> and point the config at it."""
+        from ..claim import rename_folder
+        from ..library import folder_name
+
+        name = folder_name(tag or library.name)
+        with self.ingest_lock:
+            try:
+                target = rename_folder(library.root, name)
+            except OSError as error:
+                self.call_from_thread(
+                    self.notify, f"Could not rename {library.root.name}: {error}", severity="error"
+                )
+                return
+            config_module.save_libraries(
+                [{"path": str(target if lib is library else lib.root)} for lib in self.libraries]
+            )
+            # Re-read the renamed library here, off screen: on OneDrive that takes a while.
+            index = Index(self.index.file, Config.load().libraries())
+            try:
+                index.reindex()
+            finally:
+                index.close()
+        self.call_from_thread(self.apply_config)
+        self.call_from_thread(self.notify, f"Library folder is now {target}.")
+        if after:
+            self.call_from_thread(after)
 
     def save_libraries(self, entries: list[dict]) -> None:
         """Write the libraries to the config, create missing folders, and switch to them."""

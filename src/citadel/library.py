@@ -23,6 +23,9 @@ REVIEW = "_review"
 ATTACHMENTS = "_attachments"
 SPECIAL = (INBOX, REVIEW, ATTACHMENTS)
 TOPICS_FILE = "topics.toml"
+# Every library folder is called Citadel-<tag> (Citadel-personal, Citadel-work), wherever
+# it is: the folder names the library, not the drive it sits on.
+FOLDER_PREFIX = "Citadel-"
 # Fingerprint of the default topics.toml the library's copy was made from: while the
 # copy still matches it, the user has not edited it and it can follow new defaults.
 TOPICS_ORIGIN = ".topics.default.sha256"
@@ -42,7 +45,7 @@ class Library:
 
     def __init__(self, root: Path, name: str = "", tag: str = ""):
         self.root = root
-        self.name = name or library_name(root)
+        self.name = folder_tag(root) or name or library_name(root)
         self.tag = tag or short_tag(self.name)
 
     def __repr__(self) -> str:
@@ -128,6 +131,28 @@ class Library:
         return problems
 
 
+def clean_tag(text: str) -> str:
+    """A tag as typed ("Work", "my lab") as it goes in a folder name: work, my-lab."""
+    return re.sub(r"[^a-z0-9]+", "-", text.strip().lower()).strip("-")
+
+
+def folder_name(tag: str) -> str:
+    return f"{FOLDER_PREFIX}{clean_tag(tag)}"
+
+
+def folder_tag(root: Path) -> str:
+    """The tag in a standard library folder's name (Citadel-work: work), else ""."""
+    name = root.name
+    if name.lower().startswith(FOLDER_PREFIX.lower()) and len(name) > len(FOLDER_PREFIX):
+        return clean_tag(name[len(FOLDER_PREFIX) :])
+    return ""
+
+
+def standard_folder(root: Path, name: str) -> Path:
+    """Where a library folder with an older name (Citadel) goes: Citadel-<name> beside it."""
+    return root if folder_tag(root) else root.with_name(folder_name(name))
+
+
 def library_name(root: Path) -> str:
     """A name for a library given only its path: the OneDrive account it lives in
     (~/OneDrive-Personal/Citadel, ~/Cloud/Personal-OneDrive/Citadel: "Personal")."""
@@ -136,8 +161,8 @@ def library_name(root: Path) -> str:
 
 
 def short_tag(name: str) -> str:
-    """What lists show for a library: short names whole, others by their initial."""
-    return name if len(name) <= 3 else name[:1].upper()
+    """What lists show for a library: the first letter of its tag (p, w, l)."""
+    return name[:1].lower()
 
 
 def _sha(content: bytes) -> str:

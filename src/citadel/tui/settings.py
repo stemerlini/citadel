@@ -14,7 +14,7 @@ from textual.screen import ModalScreen
 from textual.widgets import DataTable, Input, OptionList, Select, Static
 from textual.widgets.option_list import Option
 
-from ..library import TOPICS_FILE, Library
+from ..library import TOPICS_FILE, Library, clean_tag, folder_name, folder_tag, short_tag
 from .fields import Field
 from .screens import ConfirmScreen
 
@@ -24,14 +24,15 @@ BROWSERS = ("google-chrome", "chromium", "chromium-browser", "brave-browser", "m
 
 def shown(path: Path) -> str:
     try:
-        return "~/" + path.relative_to(Path.home()).as_posix()
+        inside = path.relative_to(Path.home()).as_posix()
+        return "~" if inside == "." else "~/" + inside
     except ValueError:
         return str(path)
 
 
-def folder_suggestions(home: Path | None = None) -> list[Path]:
-    """Where a library could go: a Citadel folder in each synced folder found in the home
-    folder (OneDrive, Dropbox…, also under ~/Cloud), then one on this computer only."""
+def locations(home: Path | None = None) -> list[Path]:
+    """Where a library could go: each synced folder found in the home folder (OneDrive,
+    Dropbox…, also under ~/Cloud), then the home folder itself (this computer only)."""
     home = home or Path.home()
     places: list[Path] = []
     for parent in (home, home / "Cloud"):
@@ -45,9 +46,24 @@ def folder_suggestions(home: Path | None = None) -> list[Path]:
                 parent.name == "Cloud" or any(word in name for word in CLOUD_WORDS)
             ):
                 if child.is_dir():
-                    places.append(child / "Citadel")
-    places.append(home / "Citadel")
+                    places.append(child)
+    places.append(home)
     return list(dict.fromkeys(places))
+
+
+def existing_libraries(places: list[Path]) -> list[Path]:
+    """Citadel-<tag> folders already in those places (made on another computer)."""
+    found = []
+    for place in places:
+        try:
+            found += sorted(
+                child
+                for child in place.iterdir()
+                if child.is_dir() and folder_tag(child) and (child / TOPICS_FILE).is_file()
+            )
+        except OSError:
+            continue
+    return found
 
 
 def browsers() -> list[tuple[str, str]]:
@@ -63,95 +79,134 @@ def browsers() -> list[tuple[str, str]]:
 
 
 class LibraryForm(ModalScreen[dict | None]):
-    """A library's name and folder: the first-run welcome, and adding or changing one."""
+    """Where a library goes and its tag: the folder is <location>/Citadel-<tag>. The
+    first-run welcome, adding one, and (location fixed) renaming one's tag."""
 
     BINDINGS = [Binding("escape", "dismiss(None)", "Cancel")]
 
     def __init__(
         self,
         title: str,
-        name: str = "",
-        path: str = "",
+        tag: str = "",
+        location: str = "",
         hint: str = "",
         taken: tuple[str, ...] = (),
+        rename: bool = False,
     ) -> None:
         super().__init__()
-        self.title_text, self.hint = title, hint
-        self.start_name, self.start_path = name, path
-        self.taken = {t.casefold() for t in taken}
-        self.places = folder_suggestions()
+        self.title_text, self.hint, self.rename = title, hint, rename
+        self.start_tag, self.start_location = tag, location
+        self.taken = {short_tag(t) for t in taken}  # first letters in use
+        self.places = [] if rename else locations()
+        self.found = [] if rename else existing_libraries(self.places)
 
     def compose(self) -> ComposeResult:
         with Vertical(classes="dialog wide"):
             yield Static(self.title_text, classes="title")
             if self.hint:
                 yield Static(self.hint, classes="subtitle")
-            yield Static("Folders found (Enter to pick one)", classes="field-label")
-            yield OptionList(
-                *[
+            if not self.rename:
+                yield Static("Location (Enter to pick one)", classes="field-label")
+                options = [
+                    Option(f"{shown(lib)}  [b](open this existing library)[/]", id=str(lib))
+                    for lib in self.found
+                ] + [
                     Option(
-                        f"{shown(place)}"
-                        + ("  [dim](this computer only)[/]" if place.parent == Path.home() else "")
-                        + ("  [b](a library is already here)[/]" if self.is_library(place) else ""),
+                        shown(place)
+                        + ("  [dim](this computer only)[/]" if place == Path.home() else ""),
                         id=str(place),
                     )
                     for place in self.places
-                ],
-                id="places",
+                ]
+                yield OptionList(*options, id="places")
+            yield Static("Location", classes="field-label")
+            yield Field(
+                self.start_location,
+                placeholder="~/OneDrive",
+                id="lib-location",
+                disabled=self.rename,
             )
-            yield Static("Folder", classes="field-label")
-            yield Field(self.start_path, placeholder="~/OneDrive/Citadel", id="lib-path")
-            yield Static("Name (shown as its tag: Personal, Work, Local…)", classes="field-label")
-            yield Field(self.start_name, placeholder="Personal", id="lib-name")
             yield Static(
-                "[b]Enter[/] in a field saves · [b]Esc[/] cancels · the folder is created if "
-                "missing; nothing is moved or deleted",
+                "Tag (personal, work, local…: its first letter marks the papers)",
+                classes="field-label",
+            )
+            yield Field(self.start_tag, placeholder="personal", id="lib-tag")
+            yield Static(id="lib-folder", classes="footnote")
+            yield Static(
+                "[b]Enter[/] in a field saves · [b]Esc[/] cancels · "
+                + (
+                    "the folder is renamed; nothing inside changes"
+                    if self.rename
+                    else "the folder is created if missing; nothing is moved or deleted"
+                ),
                 classes="footnote",
             )
 
-    @staticmethod
-    def is_library(place: Path) -> bool:
-        return (place / TOPICS_FILE).is_file()
-
     def on_mount(self) -> None:
-        self.query_one("#places" if not self.start_path else "#lib-path").focus()
+        self.query_one("#lib-tag" if self.rename or self.start_location else "#places").focus()
+        self.show_folder()
+
+    def folder(self) -> Path | None:
+        location = self.query_one("#lib-location", Input).value.strip()
+        tag = clean_tag(self.query_one("#lib-tag", Input).value)
+        return Path(location).expanduser() / folder_name(tag) if location and tag else None
+
+    @on(Input.Changed)
+    def show_folder(self) -> None:
+        folder = self.folder()
+        self.query_one("#lib-folder", Static).update(
+            f"Folder: [b]{shown(folder)}[/]" if folder else "Folder: pick a location and a tag"
+        )
 
     @on(OptionList.OptionSelected, "#places")
     def picked(self, event: OptionList.OptionSelected) -> None:
-        self.query_one("#lib-path", Input).value = shown(Path(event.option.id))
-        self.query_one("#lib-name", Input).focus()
+        place = Path(event.option.id)
+        tag = folder_tag(place)
+        if tag:  # an existing library: its location and tag
+            self.query_one("#lib-location", Input).value = shown(place.parent)
+            self.query_one("#lib-tag", Input).value = tag
+        else:
+            self.query_one("#lib-location", Input).value = shown(place)
+        self.query_one("#lib-tag", Input).focus()
 
     @on(Input.Submitted)
     def submit(self) -> None:
-        name = self.query_one("#lib-name", Input).value.strip()
-        path = self.query_one("#lib-path", Input).value.strip()
-        if not path:
-            self.notify("Pick or type a folder.", severity="error")
+        location = self.query_one("#lib-location", Input).value.strip()
+        tag = clean_tag(self.query_one("#lib-tag", Input).value)
+        if not location:
+            self.notify("Pick or type a location.", severity="error")
             return
-        if not name:
-            self.notify("Give the library a name, such as Personal or Work.", severity="error")
+        if not tag:
+            self.notify("Give the library a tag, such as personal or work.", severity="error")
             return
-        if name.casefold() in self.taken:
-            self.notify(f"There is already a library called {name}.", severity="error")
-            return
-        folder = Path(path).expanduser()
-        if folder.exists() and not folder.is_dir():
-            self.notify(f"{path} is a file, not a folder.", severity="error")
-            return
-        if not folder.parent.is_dir():
+        if short_tag(tag) in self.taken:
             self.notify(
-                f"{shown(folder.parent)} does not exist (is that drive mounted?).",
+                f"Another library's tag starts with {short_tag(tag)!r}: each needs its own "
+                "first letter.",
                 severity="error",
             )
             return
+        place = Path(location).expanduser()
+        folder = place / folder_name(tag)
+        if not place.is_dir():
+            self.notify(
+                f"{shown(place)} does not exist (is that drive mounted?).", severity="error"
+            )
+            return
+        if folder.exists() and not folder.is_dir():
+            self.notify(f"{shown(folder)} is a file, not a folder.", severity="error")
+            return
+        if self.rename and folder.exists():
+            self.notify(f"{shown(folder)} already exists.", severity="error")
+            return
         if Library(folder).unmounted():
             self.notify(
-                f"{shown(folder.parent)} is empty and not a mounted drive. If it is your "
+                f"{shown(place)} is empty and not a mounted drive. If it is your "
                 "OneDrive, start it first; otherwise create the folder yourself.",
                 severity="error",
             )
             return
-        self.dismiss({"name": name, "path": str(folder)})
+        self.dismiss({"path": str(folder), "tag": tag})
 
 
 class AccessForm(ModalScreen[dict | None]):
@@ -236,7 +291,7 @@ class SettingsScreen(ModalScreen[None]):
             yield Static("Libraries", classes="section")
             yield DataTable(id="lib-table", cursor_type="row")
             yield Static(
-                "[b]a[/] add a folder · [b]e[/] rename or change folder · [b]u[/] make default "
+                "[b]a[/] add a library · [b]e[/] rename its tag · [b]u[/] make default "
                 "(new papers go there) · [b]x[/] remove from Citadel (the files stay)",
                 classes="footnote",
             )
@@ -275,7 +330,7 @@ class SettingsScreen(ModalScreen[None]):
         )
 
     def entries(self) -> list[dict]:
-        return [{"name": lib.name, "path": str(lib.root)} for lib in self.app.libraries]
+        return [{"path": str(lib.root)} for lib in self.app.libraries]
 
     def selected(self) -> int:
         return self.query_one("#lib-table", DataTable).cursor_row
@@ -287,36 +342,35 @@ class SettingsScreen(ModalScreen[None]):
     def action_add(self) -> None:
         def added(result: dict | None) -> None:
             if result:
-                self.save([*self.entries(), result])
+                self.save([*self.entries(), {"path": result["path"]}])
 
         self.app.push_screen(
             LibraryForm(
                 "Add a library",
-                hint="Another Citadel folder, such as one on a work OneDrive. Each library keeps "
-                "its own papers; search covers them all.",
+                hint="Another library, such as one on a work OneDrive. Each keeps its own "
+                "papers in its own Citadel-<tag> folder; search covers them all.",
                 taken=tuple(lib.name for lib in self.app.libraries),
             ),
             added,
         )
 
     def action_change(self) -> None:
-        entries, number = self.entries(), self.selected()
-        current = entries[number]
+        library = self.app.libraries[self.selected()]
 
-        def changed(result: dict | None) -> None:
+        def renamed(result: dict | None) -> None:
             if result:
-                entries[number] = result
-                self.save(entries)
+                self.app.rename_library(library, result["tag"], after=self.refresh_view)
 
         self.app.push_screen(
             LibraryForm(
-                f"Library {current['name']}",
-                name=current["name"],
-                path=shown(Path(current["path"])),
-                hint="A new folder is used as it is: move the files there yourself first.",
-                taken=tuple(e["name"] for i, e in enumerate(entries) if i != number),
+                f"Rename the tag of {library.name}",
+                tag=library.name,
+                location=shown(library.root.parent),
+                hint=f"Its folder {shown(library.root)} is renamed to match.",
+                taken=tuple(lib.name for lib in self.app.libraries if lib is not library),
+                rename=True,
             ),
-            changed,
+            renamed,
         )
 
     def action_default(self) -> None:

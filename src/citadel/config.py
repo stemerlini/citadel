@@ -15,7 +15,7 @@ from pathlib import Path
 import tomlkit
 
 from . import paths
-from .library import Library
+from .library import Library, standard_folder
 
 
 @dataclass
@@ -80,7 +80,12 @@ class Config:
             path = entry.get("path")
             if not isinstance(path, str) or not path:
                 continue
-            library = Library(Path(path).expanduser(), str(entry.get("name") or ""))
+            root = Path(path).expanduser()
+            library = Library(root, str(entry.get("name") or ""))
+            renamed = standard_folder(root, library.name)
+            if not root.exists() and renamed.is_dir():
+                # Renamed to Citadel-<tag> on another machine: follow it.
+                library = Library(renamed)
             if any(other.name.casefold() == library.name.casefold() for other in found):
                 continue  # names identify libraries in the index: the first one wins
             if isinstance(entry.get("tag"), str) and entry["tag"]:
@@ -159,13 +164,12 @@ TEMPLATE = """\
 library = "{library}"
 # Several libraries (say a personal one and a work one, each in its own OneDrive) are
 # searched as one; files are never copied between them. Use these instead of `library`
-# (the first is where `citadel add` files by default):
+# (the first is where `citadel add` files by default). A library folder is called
+# Citadel-<tag>, and the tag (personal, work…) names it; Settings (S) in the app does this:
 # [[libraries]]
-# name = "Personal"
-# path = "~/OneDrive-Personal/Citadel"
+# path = "~/OneDrive-Personal/Citadel-personal"
 # [[libraries]]
-# name = "SES"
-# path = "~/OneDrive-SES/Citadel"
+# path = "~/OneDrive-Work/Citadel-work"
 
 [obsidian]
 # Path to your Obsidian vault. Leave empty until the vault exists.
@@ -244,14 +248,16 @@ def _home_relative(path: str) -> str:
 
 
 def save_libraries(entries: list[dict], file: Path | None = None) -> None:
-    """Write the libraries chosen in the app as [[libraries]] (name, path), in order:
-    the first is the default. The rest of the file, comments included, is kept."""
+    """Write the libraries chosen in the app as [[libraries]], in order: the first is the
+    default. A Citadel-<tag> folder names itself, so only its path is written. The rest of
+    the file, comments included, is kept."""
     file = file or paths.CONFIG_FILE
     document = _document(file)
     tables = tomlkit.aot()
     for entry in entries:
         table = tomlkit.table()
-        table["name"] = entry["name"]
+        if entry.get("name"):
+            table["name"] = entry["name"]
         table["path"] = _home_relative(entry["path"])
         tables.append(table)
     if entries:
