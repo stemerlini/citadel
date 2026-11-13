@@ -41,6 +41,18 @@ so no two tags may start with the same letter. Set it up in the app (below), or 
 `library` in `data/config.toml` (or set `CITADEL_LIBRARY`). The topic tree lives in the
 library's `topics.toml`.
 
+A topic can claim documents whatever their words, by type or by file name; keywords then
+choose among its subtopics, and papers that only mention a standard stay with their subject:
+
+```toml
+["standards"]
+types = ["standard"]          # also slides, poster, book, thesis…
+["training/trad-course"]
+files = ["*TRAD_FOR_*"]       # globs on the name a file arrived with; beat types
+```
+
+After changing topics, `R` in the review retries what waits there.
+
 Several libraries (say a personal one and one on a work OneDrive) are searched as one.
 Files never move between them: each library has its own inbox, review queue, topics and
 `library.bib`.
