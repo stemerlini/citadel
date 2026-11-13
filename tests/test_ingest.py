@@ -341,6 +341,21 @@ def test_retry_that_still_fails_stays_in_review(setup):
     assert item.original_name == "paper.pdf"
 
 
+def test_retry_routes_by_the_name_the_file_arrived_with(setup):
+    from citadel.classify import Classifier
+
+    ingester, library, _, state = setup
+    state["confidence"] = 0.5
+    drop(library, "TRAD_FOR_FAS_PRES_MOD_5.0.pdf")
+    ingester.process_inbox()
+    with (library.root / "topics.toml").open("a") as topics:
+        topics.write('\n["training"]\n["training/trad-course"]\nfiles = ["TRAD_FOR_*"]\n')
+    ingester.classifier = Classifier(library.topics())
+    ingester.retry()
+    [item] = ingester.review_items()
+    assert item.topic == "training/trad-course" and item.original_name.startswith("TRAD_FOR")
+
+
 def test_retry_puts_the_file_back_on_error(setup, monkeypatch):
     ingester, library, _, state = setup
     state["confidence"] = 0.5

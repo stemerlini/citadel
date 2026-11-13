@@ -231,6 +231,10 @@ left out on purpose.
    Discipline-level keywords count half (generic). Topics are scored along their strongest
    path down the tree; the classifier descends only while one subtopic beats the next by
    1.5x, so an unclear paper stays at the parent. Confidence = narrowest margin × evidence.
+   A topic may claim documents by `types` or by `files` (globs on the arrival name; a name
+   beats a type, a deeper topic its parent). Claimed documents start there and descend by
+   keywords; claiming topics are reached only through a claim. Made for a work library's
+   standards, slides and training material (2026-11-13).
 2. **Learned from the library (planned, after migration):** the old library's 714 hand-sorted
    papers are labelled examples. A nearest-neighbour vote over filed references (TF-IDF
    first, a small local embedding model later) adds "papers like this live in X" evidence,

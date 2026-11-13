@@ -285,7 +285,7 @@ class Ingester:
         if chosen_topic:
             topic, topic_confidence, explain = chosen_topic, 1.0, "chosen"
         else:
-            topic, topic_confidence, explain = self._classify(meta, pdf)
+            topic, topic_confidence, explain = self._classify(meta, pdf, shown.name)
 
         problems = []
         if meta is None:
@@ -423,15 +423,20 @@ class Ingester:
                 return row["citekey"]
         return None
 
-    def _classify(self, meta: Metadata | None, pdf: PdfText) -> tuple[str, float, str]:
-        if meta is None and not pdf.has_text:
-            return "", 0.0, "nothing to classify"
+    def _classify(
+        self, meta: Metadata | None, pdf: PdfText, filename: str = ""
+    ) -> tuple[str, float, str]:
+        """filename: the name the file arrived with (a topic may claim it by name)."""
         result = self.classifier.classify(
             title=meta.title if meta else "",
             abstract=meta.abstract if meta else "",
             journal=meta.journal if meta else "",
             text=pdf.first_pages,
+            type=meta.type if meta else "",
+            filename=filename,
         )
+        if meta is None and not pdf.has_text and not result.claim:
+            return "", 0.0, "nothing to classify"
         return result.topic, result.confidence, result.explain()
 
     def _proposal(
@@ -644,7 +649,9 @@ class Ingester:
                 meta = work.meta = richer
         sources.enrich(self.http, meta)
         if not topic:
-            found = self.classifier.classify(meta.title, meta.abstract, meta.journal)
+            found = self.classifier.classify(
+                meta.title, meta.abstract, meta.journal, type=meta.type
+            )
             if found.topic and found.confidence >= self.config.ingest.topic_threshold:
                 topic = found.topic
             elif fallback_topic:
@@ -828,7 +835,8 @@ class Ingester:
                 continue  # nothing new to learn about these
             path = self.library.review / proposal.file
             sidecar = self.library.review / f"{proposal.file}{PROPOSAL_SUFFIX}"
-            working = scratch / proposal.file
+            # Under the name it arrived with: a topic may claim files by name.
+            working = scratch / (proposal.original_name or proposal.file)
             working.unlink(missing_ok=True)
             _verified_copy(path, working, proposal.sha256)
             path.unlink()

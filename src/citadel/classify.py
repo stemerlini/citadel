@@ -9,11 +9,18 @@ being forced into a subfield.
 
 Confidence is the narrowest win along the chosen path (1 = no competition,
 0 = a tie), scaled down when there is little evidence at all.
+
+A topic may claim documents outright: by type (`types = ["standard"]`) or by file
+name (`files = ["TRAD_FOR_*"]`); a file-name claim beats a type claim, the deeper
+topic beats its parent. A claimed document starts at that topic and only descends
+by keywords; a claiming topic and its subtopics are reached only through the claim,
+so a paper that merely mentions a standard stays with its subject.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from fnmatch import fnmatchcase
 
 from . import naming
 from .topics import Topic
@@ -36,6 +43,7 @@ class Classification:
     confidence: float
     ranking: list[tuple[str, float]] = field(default_factory=list)  # top disciplines
     matches: dict[str, list[str]] = field(default_factory=dict)  # topic -> keywords found
+    claim: str = ""  # what put it under a claiming topic: "type standard", "file name"
 
     def as_dict(self) -> dict:
         return {
@@ -46,6 +54,8 @@ class Classification:
         }
 
     def explain(self) -> str:
+        if self.claim:
+            return f"topic {self.topic} (by {self.claim})"
         found = ", ".join(self.matches.get(self.topic, [])[:6])
         runners = "; ".join(f"{t} {s:.1f}" for t, s in self.ranking[1:3])
         return f"topic {self.topic or '-'} ({found or 'no keywords'}); next: {runners or '-'}"
@@ -83,9 +93,31 @@ class Classifier:
         self.keywords = {
             t.path: [(k, tuple(tokens(k))) for k in t.keywords if tokens(k)] for t in topics
         }
+        self.claiming = {t.path for t in topics if t.types or t.files}
+        self.closed = {  # reached only through a claim
+            p for p in self.topics if any(p == c or p.startswith(c + "/") for c in self.claiming)
+        }
+
+    def claimed(self, type: str = "", filename: str = "") -> tuple[str, str]:
+        """The topic claiming a document, and why: its file name, else its type."""
+        name = filename.lower()
+        for test, why in (
+            (lambda t: name and any(fnmatchcase(name, g.lower()) for g in t.files), "file name"),
+            (lambda t: type and type in t.types, f"type {type}"),
+        ):
+            found = [p for p in self.claiming if test(self.topics[p])]
+            if found:
+                return max(found, key=lambda p: (self.topics[p].depth, p)), why
+        return "", ""
 
     def classify(
-        self, title: str = "", abstract: str = "", journal: str = "", text: str = ""
+        self,
+        title: str = "",
+        abstract: str = "",
+        journal: str = "",
+        text: str = "",
+        type: str = "",
+        filename: str = "",
     ) -> Classification:
         fields = {"title": title, "abstract": abstract, "journal": journal, "text": text}
         grams = {name: ngrams(value) for name, value in fields.items() if value}
@@ -105,24 +137,41 @@ class Classifier:
             if found:
                 matches[path] = found
 
+        claim, why = self.claimed(type, filename)
+        # Without a claim, closed topics are out of reach; with one, the other claimers.
+        blocked = (self.claiming - {claim}) if claim else self.closed
         path_score: dict[str, float] = {}
+
+        def kids_of(path: str) -> list[str]:
+            return [c for c in self.children.get(path, []) if c not in blocked]
 
         def score(path: str) -> float:
             """The topic's own evidence plus its best child's: the strongest path down.
             (Summing all children would let broad subtrees win on many weak matches.)"""
             if path not in path_score:
-                kids = self.children.get(path, [])
-                path_score[path] = own[path] + max((score(c) for c in kids), default=0.0)
+                path_score[path] = own[path] + max((score(c) for c in kids_of(path)), default=0.0)
             return path_score[path]
 
-        roots = sorted(self.children.get("", []), key=score, reverse=True)
+        if claim:
+            topic, margins = self._descend(claim, kids_of, score)
+            return Classification(topic, min(margins, default=1.0), [], matches, why)
+
+        roots = sorted(kids_of(""), key=score, reverse=True)
         if not roots or score(roots[0]) == 0:
             return Classification("", 0.0, [], matches)
 
-        topic = roots[0]
-        margins = [_margin(roots, score)]
+        topic, margins = self._descend(roots[0], kids_of, score)
+        margins.insert(0, _margin(roots, score))
+        strength = min(1.0, score(roots[0]) / STRONG_EVIDENCE)
+        ranking = [(r, score(r)) for r in roots[:3]]
+        return Classification(topic, strength * min(margins), ranking, matches)
+
+    @staticmethod
+    def _descend(topic: str, kids_of, score) -> tuple[str, list[float]]:
+        """Go down while one child clearly dominates; the margins of each step."""
+        margins = []
         while True:
-            kids = sorted(self.children.get(topic, []), key=score, reverse=True)
+            kids = sorted(kids_of(topic), key=score, reverse=True)
             if not kids or score(kids[0]) < DESCEND_MIN:
                 break
             margin = _margin(kids, score)
@@ -130,10 +179,7 @@ class Classifier:
                 break  # two subtopics are about equally likely: stay at the parent
             margins.append(margin)
             topic = kids[0]
-
-        strength = min(1.0, score(roots[0]) / STRONG_EVIDENCE)
-        ranking = [(r, score(r)) for r in roots[:3]]
-        return Classification(topic, strength * min(margins), ranking, matches)
+        return topic, margins
 
 
 def _margin(ranked: list[str], score) -> float:

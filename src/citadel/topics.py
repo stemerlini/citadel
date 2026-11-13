@@ -25,6 +25,10 @@ class Topic:
     path: str
     description: str = ""
     keywords: tuple[str, ...] = field(default=())
+    # Documents this topic claims whatever their words: by type (standard, slides…)
+    # or by file name (globs, case-insensitive). See classify.py.
+    types: tuple[str, ...] = field(default=())
+    files: tuple[str, ...] = field(default=())
 
     @property
     def parent(self) -> str | None:
@@ -57,11 +61,14 @@ def parse(text: str) -> list[Topic]:
         bad = [s for s in segments if not SEGMENT.match(s)]
         if bad:
             problems.append(f"{path}: use lowercase kebab-case ({', '.join(bad)})")
-        keywords = table.get("keywords", [])
-        if not isinstance(keywords, list) or not all(isinstance(k, str) for k in keywords):
-            problems.append(f"{path}: keywords must be a list of strings")
-            keywords = []
-        topics.append(Topic(path, str(table.get("description", "")), tuple(keywords)))
+        lists = {}
+        for key in ("keywords", "types", "files"):
+            value = table.get(key, [])
+            if not isinstance(value, list) or not all(isinstance(v, str) for v in value):
+                problems.append(f"{path}: {key} must be a list of strings")
+                value = []
+            lists[key] = tuple(value)
+        topics.append(Topic(path, str(table.get("description", "")), **lists))
 
     known = {t.path for t in topics}
     for topic in topics:
