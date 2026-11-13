@@ -148,3 +148,24 @@ def test_notes_are_reported(setup):
     notes = {m.key: m.has_notes for m in group.members}
     assert notes == {"verma2004statistical": True, "copy2004x": False}
     assert group.members[0].key == "verma2004statistical"  # the copy with notes first
+
+
+def test_a_paper_in_two_libraries_is_not_a_duplicate(tmp_path):
+    personal, ses = Library(tmp_path / "p", "Personal"), Library(tmp_path / "s", "SES")
+    personal.init()
+    ses.init()
+    file_ref(personal.root, make_ref(pdf_sha256="a" * 64))
+    index = Index(tmp_path / "index.db", [personal, ses])
+    index.reindex()
+    (ses.review / "verma.pdf").write_bytes(b"%PDF")
+    Proposal("verma.pdf", "ready to file", "a" * 64).save(ses.review)
+    assert duplicates.find(index, [personal, ses]) == []  # nothing a keep could delete
+
+    (ses.review / "verma (2).pdf").write_bytes(b"%PDF")
+    Proposal("verma (2).pdf", "ready to file", "a" * 64).save(ses.review)
+    [group] = duplicates.find(index, [personal, ses])
+    assert {(m.library, m.key) for m in group.members} == {
+        ("SES", "verma.pdf"),
+        ("SES", "verma (2).pdf"),
+    }
+    index.close()

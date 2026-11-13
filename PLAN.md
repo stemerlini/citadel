@@ -329,7 +329,10 @@ folders), then `omarchy plugin enable smerlini.citadel`.
   `--json`, the MCP results, `cite --json`. `--library NAME` filters `list`/`search`.
 - Each library has its own `_inbox/`, `_review/`, `topics.toml` and `library.bib`; a file
   is filed only within its own library, duplicate checks stay within it, and
-  `duplicates` may show a paper in both libraries but deletes only within one.
+  `duplicates` lists copies within one library only: a paper in two libraries is not a
+  duplicate, and nothing is deleted from another library (2026-11-13).
+- The TUI review (`i`) reads every library's inbox and review queue; each item shows its
+  library and is accepted, re-topicked or rejected there (2026-11-13).
 - Verified with a fresh headless Claude Code session: it searched Citadel unprompted, cited
   `tylka1997creme96`, and asked for conversion instead of guessing a section.
 
