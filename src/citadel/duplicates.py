@@ -152,9 +152,11 @@ def find(index: Index, libraries: Library | list[Library]) -> list[Group]:
             reasons.setdefault(member_id, set()).add(reason)
             reasons.setdefault(target, set()).add(reason)
 
-    groups: dict[str, Group] = {}
+    # Only copies within one library are duplicates: a paper may well be in two
+    # libraries, and a copy in another library is never deleted (see keep).
+    groups: dict[tuple[str, str], Group] = {}
     for member_id in members:
-        group = groups.setdefault(root(member_id), Group([]))
+        group = groups.setdefault((root(member_id), members[member_id].library), Group([]))
         group.members.append(members[member_id])
         group.reasons = sorted(set(group.reasons) | reasons.get(member_id, set()))
     ignored = set().union(*(_ignored(_ignore_file(lib)) for lib in libraries)) | _ignored(

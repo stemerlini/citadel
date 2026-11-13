@@ -133,7 +133,7 @@ theme; elsewhere Citadel uses Omarchy's default, Tokyo Night.
 | `c` / `b` / `k` | copy the reference / BibTeX / citekey | `r` | unread → reading → read |
 | `e` | edit metadata (`Ctrl+S` saves) | `t` | move to another topic |
 | `m` | convert to Markdown (GPU) | `a` | add a PDF, `doi:…` or `arxiv:…` |
-| `i` | read the inbox, then the review queue (`a` accept, `t` other topic, `d` DOI, `x` reject, `v` mark, `R` retry) | `D` | duplicates: keep one copy |
+| `i` | read every library's inbox, then their review queues (`a` accept, `t` other topic, `d` DOI, `x` reject, `v` mark, `R` retry) | `D` | duplicates: keep one copy |
 | `f` | citation tree: references / cited by, step in (`Enter`) and back (`←`), `a` add | | |
 | `w` | open the publisher page (DOI) | `g` | Google search for the paper |
 | `L` / 🔑 | sign in to your library (paywalled papers) | `S` | settings: libraries, sign-in |

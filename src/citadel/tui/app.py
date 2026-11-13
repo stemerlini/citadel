@@ -871,10 +871,14 @@ class Citadel(App):
             self.open_review()
 
     def inbox_files(self) -> list[Path]:
-        inbox = self.library.inbox
-        if not inbox.is_dir():
-            return []
-        return [p for p in inbox.iterdir() if p.is_file() and not p.name.startswith(".")]
+        """What waits in every library's inbox."""
+        return [
+            p
+            for library in self.available()
+            if library.inbox.is_dir()
+            for p in library.inbox.iterdir()
+            if p.is_file() and not p.name.startswith(".")
+        ]
 
     @work(thread=True, group="ingest")
     def read_inbox(self) -> None:
@@ -885,15 +889,17 @@ class Citadel(App):
 
         with self.ingest_lock:
             index = self.open_index()
+            http = Http(self.config.metadata.contact_email)
+            results = []
             try:
-                ingester = Ingester(
-                    self.library, index, Http(self.config.metadata.contact_email), self.config
-                )
-                results = ingester.process_inbox(settle=INBOX_SETTLE)
+                for library in self.available():
+                    ingester = Ingester(library, index, http, self.config)
+                    results += ingester.process_inbox(settle=INBOX_SETTLE)
             except OSError as error:
                 self.call_from_thread(self.notify, str(error), severity="error")
                 results = []
             finally:
+                http.close()
                 index.close()
         filed = [r for r in results if r.status == "filed"]
         left = len(self.inbox_files())
@@ -913,20 +919,27 @@ class Citadel(App):
         self.push_screen(
             ReviewScreen(
                 self.review_items(),
-                self.topic_paths(),
+                self.topic_paths,
                 lambda action, names, **kw: self.run_ingester(action, names, **kw),
             )
         )
 
     def review_items(self):
+        """Everything waiting in review, in every library (each item says which)."""
         from ..ingest import Ingester
 
-        return Ingester(self.library, self.index, None, self.config).review_items()
+        return [
+            item
+            for library in self.available()
+            for item in Ingester(library, self.index, None, self.config).review_items()
+        ]
 
     @work(thread=True, group="ingest")
-    def run_ingester(self, action: str, targets: list[str], **kwargs) -> None:
+    def run_ingester(self, action: str, targets: list[str], library: str = "", **kwargs) -> None:
         """add / accept / reject / retry, one target after the other, in a worker thread
-        with its own connections. The lock keeps two batches from racing on files."""
+        with its own connections. The lock keeps two batches from racing on files.
+        library: where the targets are (review items); else the default library, or for
+        retry every library."""
         from ..ingest import Ingester
         from ..sources import Http, SourceError
 
@@ -942,10 +955,16 @@ class Citadel(App):
             }[action]
             filed: list[str] = []
             failures = 0
+            if library:
+                libraries = [self.library_of(library)]
+            else:
+                libraries = self.available() if action == "retry" else [self.library]
+            jobs = [(lib, target) for lib in libraries for target in targets]
+            items = []
             try:
-                ingester = Ingester(self.library, index, http, self.config)
-                for number, target in enumerate(targets, 1):
-                    self.busy = f"{verb} {number}/{len(targets)}: {target or 'all'}"
+                for number, (lib, target) in enumerate(jobs, 1):
+                    ingester = Ingester(lib, index, http, self.config)
+                    self.busy = f"{verb} {number}/{len(jobs)}: {target or 'all'}"
                     try:
                         if action == "add":
                             results = [ingester.add(target, **kwargs)]
@@ -967,7 +986,8 @@ class Citadel(App):
                             filed.append(result.citekey)
                         elif result.status == "error":
                             failures += 1
-                items = ingester.review_items()
+                for lib in libraries:
+                    items += Ingester(lib, index, None, self.config).review_items()
             finally:
                 self.busy = ""
                 http.close()
@@ -980,14 +1000,14 @@ class Citadel(App):
         self.call_from_thread(
             self.notify, summary, severity="warning" if failures else "information"
         )
-        self.call_from_thread(self.after_ingest, items, filed[-1] if filed else "")
+        self.call_from_thread(self.after_ingest, filed[-1] if filed else "")
         if filed and self.config.convert.auto:
             self.call_from_thread(self.convert, filed)
 
-    def after_ingest(self, items, citekey: str) -> None:
+    def after_ingest(self, citekey: str) -> None:
         self.reload(keep=citekey or None)
         if isinstance(self.screen, ReviewScreen):
-            self.screen.refresh_items(items)
+            self.screen.refresh_items(self.review_items())
 
     def refresh_duplicates(self) -> None:
         self.duplicates_run += 1

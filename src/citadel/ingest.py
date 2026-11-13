@@ -77,9 +77,11 @@ class Proposal:
     added: str = ""
     source: str = "inbox"  # kept for the reference when the item is accepted
     original_name: str = ""  # the file's name when it arrived (main.pdf, 2103.00613.pdf…)
+    library: str = ""  # the library whose review queue holds it: set when read, never saved
 
     def save(self, folder: Path) -> None:
-        (folder / f"{self.file}{PROPOSAL_SUFFIX}").write_text(json.dumps(asdict(self), indent=2))
+        data = {k: v for k, v in asdict(self).items() if k != "library"}
+        (folder / f"{self.file}{PROPOSAL_SUFFIX}").write_text(json.dumps(data, indent=2))
 
     @classmethod
     def load(cls, path: Path) -> Proposal:
@@ -726,6 +728,7 @@ class Ingester:
         for file in sorted(review.glob(f"*{PROPOSAL_SUFFIX}")):
             proposal = Proposal.load(file)
             if (review / proposal.file).exists():
+                proposal.library = self.library.name
                 items.append(proposal)
         return items
 

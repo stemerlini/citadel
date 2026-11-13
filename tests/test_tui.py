@@ -163,6 +163,52 @@ async def test_review_key_reads_the_inbox_first(make_app, monkeypatch):
         assert isinstance(app.screen, ReviewScreen)
 
 
+async def test_review_covers_every_library(tmp_path, monkeypatch):
+    """i reads every library's inbox and review queue, and settles an item in its own
+    library (found with the SES library's papers waiting while Personal was empty)."""
+    from citadel.ingest import Ingester, Proposal, Result
+    from citadel.tui.screens import ReviewScreen
+
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path / "run"))
+    personal, ses = Library(tmp_path / "p", "Personal"), Library(tmp_path / "s", "SES")
+    personal.init()
+    ses.init()
+    (ses.review / "waiting.pdf").write_bytes(b"%PDF")
+    Proposal("waiting.pdf", "ready to file: accept it", "a" * 64).save(ses.review)
+    read, accepted = [], []
+
+    def fake_process(self, dry_run=False, settle=None):
+        for path in self.library.inbox.iterdir():
+            read.append((self.library.name, path.name))
+            path.unlink()
+        return [Result(name, "review", "") for _, name in read]
+
+    def fake_accept(self, name, **kw):
+        accepted.append((self.library.name, name))
+        return Result(name, "review")
+
+    monkeypatch.setattr(Ingester, "process_inbox", fake_process)
+    monkeypatch.setattr(Ingester, "accept", fake_accept)
+    config = Config(
+        library_entries=[
+            {"name": "Personal", "path": str(personal.root)},
+            {"name": "SES", "path": str(ses.root)},
+        ]
+    )
+    app = Citadel(config=config, index=Index(tmp_path / "index.db", [personal, ses]))
+    async with app.run_test(size=(140, 40)) as pilot:
+        (ses.inbox / "new.pdf").write_bytes(b"%PDF")
+        await pilot.press("i")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        assert read == [("SES", "new.pdf")]
+        assert isinstance(app.screen, ReviewScreen)
+        assert [(i.library, i.file) for i in app.screen.items] == [("SES", "waiting.pdf")]
+        await pilot.press("a")
+        await app.workers.wait_for_complete()
+        assert accepted == [("SES", "waiting.pdf")]
+
+
 async def test_review_marks_and_batch_topic(make_app):
     from citadel.ingest import Proposal
     from citadel.tui.screens import ReviewScreen
@@ -177,13 +223,13 @@ async def test_review_marks_and_batch_topic(make_app):
         app.push_screen(
             ReviewScreen(
                 items,
-                app.topic_paths(),
+                app.topic_paths,
                 lambda action, names, **kw: calls.append((action, names, kw)),
             )
         )
         await pilot.pause()
         await pilot.press("v", "v")  # marks paper0 and paper1 (the cursor moves down)
-        assert app.screen.marked == {"paper0.pdf", "paper1.pdf"}
+        assert app.screen.marked == {("", "paper0.pdf"), ("", "paper1.pdf")}
         await pilot.press("t")
         await pilot.pause()
         await pilot.press(*"aero-optics", "enter")
@@ -191,7 +237,7 @@ async def test_review_marks_and_batch_topic(make_app):
         assert calls[-1] == (
             "accept",
             ["paper0.pdf", "paper1.pdf"],
-            {"topic": "optics/aero-optics"},
+            {"library": "", "topic": "optics/aero-optics"},
         )
         await pilot.press("R")
         assert calls[-1] == ("retry", [""], {})

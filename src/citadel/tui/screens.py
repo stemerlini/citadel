@@ -396,12 +396,12 @@ class ReviewScreen(ModalScreen[None]):
         Binding("space", "preview", "Preview"),
     ]
 
-    def __init__(self, items, topics: list[str], settle) -> None:
+    def __init__(self, items, topics, settle) -> None:
         super().__init__()
-        self.items = items  # list[ingest.Proposal]
-        self.topics = topics
-        self.settle = settle  # callable(action, [names], **kwargs) run by the app
-        self.marked: set[str] = set()
+        self.items = items  # list[ingest.Proposal], from every library
+        self.topics = topics  # callable(library name) -> its topic paths
+        self.settle = settle  # callable(action, [names], library=…, **kwargs) run by the app
+        self.marked: set[tuple[str, str]] = set()  # (library, file)
 
     def compose(self) -> ComposeResult:
         with Vertical(id="review"):
@@ -423,10 +423,19 @@ class ReviewScreen(ModalScreen[None]):
         self.refresh_items(self.items)
         self.query_one("#review-list").focus()
 
+    @staticmethod
+    def key(item) -> tuple[str, str]:
+        return (item.library, item.file)
+
+    def settle_each_library(self, action: str, items, **kwargs) -> None:
+        """Hand the items to the app, one batch per library they wait in."""
+        for library in dict.fromkeys(item.library for item in items):
+            names = [item.file for item in items if item.library == library]
+            self.settle(action, names, library=library, **kwargs)
+
     def refresh_items(self, items) -> None:
         self.items = items
-        names = {item.file for item in items}
-        self.marked &= names
+        self.marked &= {self.key(item) for item in items}
         marked = f" · [b]{len(self.marked)} marked[/]" if self.marked else ""
         self.query_one("#review-title", Static).update(
             (f"Review · {len(items)} waiting" if items else "Review · nothing waiting") + marked
@@ -434,9 +443,11 @@ class ReviewScreen(ModalScreen[None]):
         options = self.query_one("#review-list", OptionList)
         index = options.highlighted or 0
         options.clear_options()
-        for item in items:
-            mark = "[b $accent]●[/] " if item.file in self.marked else "  "
-            options.add_option(Option(mark + escape(item.file), id=item.file))
+        several = len({item.library for item in items}) > 1
+        for number, item in enumerate(items):
+            mark = "[b $accent]●[/] " if self.key(item) in self.marked else "  "
+            where = f"[dim]{escape(item.library)}[/] " if several else ""
+            options.add_option(Option(mark + where + escape(item.file), id=f"item-{number}"))
         if items:
             options.highlighted = min(index, len(items) - 1)
         self.show_details()
@@ -451,7 +462,7 @@ class ReviewScreen(ModalScreen[None]):
     def targets(self) -> list:
         """The marked items, or the highlighted one."""
         if self.marked:
-            return [item for item in self.items if item.file in self.marked]
+            return [item for item in self.items if self.key(item) in self.marked]
         return [self.current] if self.current else []
 
     @on(OptionList.OptionSelected, "#review-list")
@@ -461,7 +472,7 @@ class ReviewScreen(ModalScreen[None]):
     def action_mark(self) -> None:
         item = self.current
         if item:
-            self.marked ^= {item.file}
+            self.marked ^= {self.key(item)}
             options = self.query_one("#review-list", OptionList)
             index = options.highlighted
             self.refresh_items(self.items)
@@ -469,7 +480,7 @@ class ReviewScreen(ModalScreen[None]):
                 options.highlighted = index + 1
 
     def action_mark_all(self) -> None:
-        everything = {item.file for item in self.items}
+        everything = {self.key(item) for item in self.items}
         self.marked = set() if self.marked == everything else everything
         self.refresh_items(self.items)
 
@@ -486,6 +497,8 @@ class ReviewScreen(ModalScreen[None]):
             return
         meta = item.metadata or {}
         lines = [f"[b $warning]{escape(item.reason)}[/]", ""]
+        if item.library:
+            lines[1:1] = [f"[dim]in the {escape(item.library)} library[/]"]
         if item.original_name and item.original_name != item.file:
             lines[1:1] = [f"[dim]arrived as {escape(item.original_name)}[/]"]
         if meta:
@@ -508,22 +521,28 @@ class ReviewScreen(ModalScreen[None]):
     def action_accept(self) -> None:
         targets = self.targets()
         if targets:
-            self.settle("accept", [item.file for item in targets])
+            self.settle_each_library("accept", targets)
             self.marked.clear()
 
     def action_accept_topic(self) -> None:
         targets = self.targets()
         if not targets:
             return
+        if len({item.library for item in targets}) > 1:
+            self.app.notify(
+                "Each library has its own topics: mark items of one library.", severity="warning"
+            )
+            return
         what = targets[0].file if len(targets) == 1 else f"{len(targets)} items"
 
         def chosen(topic: str | None) -> None:
             if topic:
-                self.settle("accept", [item.file for item in targets], topic=topic)
+                self.settle_each_library("accept", targets, topic=topic)
                 self.marked.clear()
 
         self.app.push_screen(
-            TopicPicker(self.topics, targets[0].topic, f"Topic for {what}"), chosen
+            TopicPicker(self.topics(targets[0].library), targets[0].topic, f"Topic for {what}"),
+            chosen,
         )
 
     def action_accept_doi(self) -> None:
@@ -531,7 +550,7 @@ class ReviewScreen(ModalScreen[None]):
         if item:
             self.app.push_screen(
                 Prompt("Accept with a DOI", "10.…", "Citadel takes the metadata from Crossref."),
-                lambda doi: doi and self.settle("accept", [item.file], doi=doi),
+                lambda doi: doi and self.settle_each_library("accept", [item], doi=doi),
             )
 
     def action_edit(self) -> None:
@@ -556,7 +575,7 @@ class ReviewScreen(ModalScreen[None]):
         def save(changes: dict | None) -> None:
             changes = {k: v for k, v in (changes or {}).items() if k != "tags"}
             if changes:
-                self.settle("edit", [item.file], **changes)
+                self.settle_each_library("edit", [item], **changes)
 
         self.app.push_screen(EditScreen(ref), save)
 
@@ -576,7 +595,7 @@ class ReviewScreen(ModalScreen[None]):
 
         def confirmed(yes: bool) -> None:
             if yes:
-                self.settle("reject", [item.file for item in targets])
+                self.settle_each_library("reject", targets)
                 self.marked.clear()
 
         self.app.push_screen(ConfirmScreen(question), confirmed)
@@ -595,7 +614,7 @@ class ReviewScreen(ModalScreen[None]):
                 abstract=meta.get("abstract", ""),
                 topic=item.topic,
             )
-            pdf = self.app.library.review / item.file
+            pdf = self.app.library_of(item.library).review / item.file
             self.app.push_screen(PreviewScreen(ref, pdf.parent, pdf=pdf))
 
 
